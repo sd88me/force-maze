@@ -184,26 +184,46 @@ already race each other); adding `ForceMazeVoice`'s `run_maze_host.sh` as a
 **third** unlocked writer measurably worsened the collision rate in
 practice.
 
-**Mitigation applied**: `run_maze_host.sh` and `addon/manage.sh` now wrap
-every read-modify-write of `$mmLD_PRELOAD_VAR` in an `mkdir`-based mutex
-(atomic even on busybox; bounded retry, fails OPEN rather than risking a
-hung boot on a stale lock). This makes OUR participation safe. **It cannot
-fix `mockbaMagic`/`MidiLoop`'s own unlocked writes** - they don't check for
-or respect this lock, so the underlying two-way race between them is
-unchanged.
+**Mitigation applied (our side)**: `run_maze_host.sh` and `addon/manage.sh`
+wrap every read-modify-write of `$mmLD_PRELOAD_VAR` in an `mkdir`-based
+mutex (atomic even on busybox; bounded retry, fails OPEN rather than
+risking a hung boot on a stale lock). This makes OUR participation safe,
+but on its own doesn't fix the underlying two-way race between
+`mockbaMagic` and `MidiLoop` - they don't check for or respect a lock they
+don't have.
 
-**Consequence**: the engine (`addon/manage.sh`) is currently kept
-**disabled** on the test device. Our own write is now safe, but
-re-enabling autolaunch reintroduces a third participant into a shared file
-two OTHER addons still touch unsafely, and empirically that measurably
-raised the odds of hitting the pre-existing race. Re-enable only after
-either (a) `mockbaMagic`/`MidiLoop` also adopt locking (out of scope - not
-our addons), or (b) a lower-risk approach is found (e.g. writing our entry
-without ever reading/rewriting the whole file, if MockbaMod ever exposes a
-safe primitive for that).
+**Actually fixed at the source (2026-09-13)**: patched the same `mkdir`
+lock directly into `mockbaMagic`'s and `MidiLoop`'s own `run_*.sh` scripts
+(both the top-level copy and the copy inside each addon's own folder, since
+`manage.sh ENABLE` re-copies from the latter). Small, behavior-preserving
+change - same `LD_PRELOAD` content, same load order, just serialized.
+Patches committed in the `sd88me/MockbaMod` fork
+(`SD/AddOns/mockbaMagic/`, `SD/AddOns/MidiLoop/`); full writeup in the
+`mockbamod-module-creator` skill's `references/gotchas.md`.
 
-The web panel (`web/manage.sh`) never touches `LD_PRELOAD` at all and has
-none of this risk - it stays enabled independently.
+Also learned along the way: `systemctl restart acvs` doesn't just restart
+the touchscreen app - its cgroup includes `boot.sh` itself, so restarting
+`acvs` **re-runs the entire top-level `AddOns/*.sh` kill+relaunch
+sequence**, hitting this exact race again every time. That's actually
+useful: it means `acvs` restarts (fast, no power-cycle needed) are a valid
+way to repeatedly re-test this, not just physical reboots. It also means
+there's no clever staging trick on our own side that avoids the race -
+arming `LD_PRELOAD` for anything always goes through this same door.
+
+**Verified live**: 8 consecutive `acvs` restarts (a mix of general testing
+and a run starting from a confirmed-good baseline, specifically to rule out
+"was it already broken beforehand") all produced correct `LD_PRELOAD`
+content, and pads/buttons were physically confirmed responsive afterward
+each time.
+
+**Status now**: the root cause is fixed, so re-enabling the engine's
+autolaunch (`addon/manage.sh ENABLE`) should no longer carry the elevated
+risk that kept it disabled - the two-way race it would have joined is
+itself now locked. Re-enable and re-verify with the same "several `acvs`
+restarts + physical pad check" method before trusting it unattended.
+
+The web panel (`web/manage.sh`) never touched `LD_PRELOAD` at all and had
+none of this risk either way - it stayed enabled independently throughout.
 
 ## `acvs`, not `inmusic-mpc`
 
@@ -322,6 +342,55 @@ through gzip/JSON, matches the real file's shape) but **not yet visually
 confirmed on a real screen** - load it once and check that knob names/
 ranges look right and Generate behaves as a momentary trigger, not a
 sticky value.
+
+## Multiple simultaneous voices (per-voice mix control, not a central mixer)
+
+`forceAudioIn.so` mixes up to `AI_MAX_VOICES` (4) independent voice hosts at
+once, each in its own named shared-memory ring (`/forceAudioInject0`,
+`/forceAudioInject1`, ...) - see `forceAudioInject.h`. Every ring stays
+genuinely single-producer/single-consumer (one voice host writes its own
+ring; `forceAudioIn.so` is the sole reader of all of them), so this scales
+without adding any cross-process synchronization beyond what already existed
+per ring.
+
+**Deliberately no central "mixer" control panel.** Each ring's `enabled`/
+`gain`/`channel_mask` fields are the on/off, volume, and L/R/L+R routing for
+*that* voice, written by that voice's own control socket (`maze_host`'s
+`mix.enabled`/`mix.gain`/`mix.channel` keys, intercepted in
+`handle_ctrl_line` before reaching `maze_voice.c`'s `set_param`) and exposed
+in that voice's own web panel ("Output Mix" section, `web/index.html`). A
+separate coordinating mixer page would need its own IPC path into each
+voice's socket for no real benefit - every voice already has one.
+
+**Channel select is L / R / L+R, not an arbitrary voice-count.** The tapped
+capture handle is confirmed 2-channel (see "The core problem" above) - that
+is the actual hardware ceiling, not a software choice. Two voices routed to
+the same channel simply sum there, same as two synths sharing one mixer
+channel; you cannot get more than 2 fully-independent buses out of a
+2-channel tap.
+
+**Mute happens at the consumer, never by pausing the producer.** A voice's
+render cadence is its own synth's clock (envelopes/filters advance every
+`render_block` call - see "THE RENDER CADENCE IS THE SYNTH'S CLOCK" in
+`maze_host.cpp`). `enabled=0` only skips adding that voice's samples into the
+output in `mix_in_one`; the ring is still drained at the normal rate so a
+re-enabled voice resumes from live backlog, not a stale one.
+
+**LD_PRELOAD is armed once, not per voice.** `forceAudioIn.so` itself needs
+loading into MPC exactly once - it already attaches to every slot that has a
+ring present. Running a second/third simultaneous voice addon means giving
+its `maze_host` a distinct `--mix-slot`, but its `run_*.sh` must skip the
+"ARM THE TAP FIRST" `LD_PRELOAD` section entirely (see the comment in
+`addon/run_maze_host.sh`) - two addons both arming the same-by-substring
+`forceAudioIn` entry race exactly like the mockbaMagic/MidiLoop
+boot-time-LD_PRELOAD bug documented above.
+
+**Not yet done:** cross-built/hardware-tested (this change is source-only so
+far - `addon/forceAudioIn.so`, `addon/maze_host`, `addon/injectTone` all need
+rebuilding via `scripts/build.sh` / `scripts/build_audiotap.sh` before this
+is real on a device); no second voice addon actually created yet (would need
+its own module.json/NSMODULE.json/ports, per the mockbamod-module-creator
+skill's port-collision guidance, e.g. web panel 8305 following 8303/8304).
 
 ## Not yet built
 
