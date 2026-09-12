@@ -54,7 +54,16 @@ src/
   include/plugin_api_v1.h Schwung's plugin ABI (v1 host_api, v1/v2 plugin API)
   rtmidi/                 vendored RtMidi 6 (ALSA backend)
 addon/                  MockbaMod addon: manage.sh, run_ForceMazeVoice.sh,
-                        prebuilt forceAudioIn.so + maze_host, module.json
+                        prebuilt forceAudioIn.so + maze_host, module.json,
+                        web/ (bundled copy of the web GUI below)
+web/
+  index.html            control panel - ported verbatim in style/layout from
+                        schwung-maze's own web_ui.html (the "rack" look,
+                        SVG knobs, section layout all unchanged); only the
+                        transport (Move's schwungRemote/postMessage API) is
+                        swapped for fetch() calls to server.py
+  server.py             stdlib-only HTTP server bridging the page to
+                        maze_host's Unix control socket (SET/GET/DESCRIBE/NOTE)
 scripts/
   Dockerfile, build.sh          armhf-native (QEMU) build for maze_host,
                                 same toolchain as force-acid
@@ -85,16 +94,19 @@ real-hardware incidents worth reading before touching this again.
 Then: route a MIDI track to `Mockba Maze:In` for notes, and monitor/record
 from whichever Audio-In track corresponds to the Force's `hw:2` capture
 device (confirmed live - may enumerate differently if your USB device order
-differs).
+differs). Open `http://<force-ip>:8304` for the web control panel - the
+`Audition` strip at the bottom plays a note straight from the page, no MIDI
+keyboard needed to hear a change take effect.
 
 ## Status
 
 Working end-to-end and hardware-verified: DSP core ported, note-in,
-synthesized audio audible on a real Audio-In track. Audio timing needed real
-tuning (see `DESIGN.md` for the full story) — currently a fixed clock-rate
+synthesized audio audible on a real Audio-In track, full web control panel
+(every `chain_params` knob/switch from `module.json`, styled and laid out
+exactly like the original Move version). Audio timing needed real tuning
+(see `DESIGN.md` for the full story) — currently a fixed clock-rate
 correction plus a generous ~100/200ms ring buffer, not yet a fully "locked"
-adaptive solution. `ForceAudioIn`/`ForceMazeVoice` are currently **disabled**
-on the test device pending further, more carefully isolated tuning.
+adaptive solution.
 
 ## License
 

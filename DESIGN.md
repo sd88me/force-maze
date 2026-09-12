@@ -176,13 +176,39 @@ Two separate build paths:
   arm-linux-gnueabihf.2.39` (matches the Force's exact glibc, confirmed
   live) - no Docker needed at all. See `scripts/build_audiotap.sh`.
 
+## Web GUI
+
+Built by reusing `schwung-maze`'s own `web_ui.html` almost verbatim -
+CSS, SVG-generated knobs, drag/wheel/dblclick interaction, and the exact
+section layout (Oscillators / Mixer / Wavefolder→Filter / Env-Output /
+Randomise) are all unchanged, since they're already hand-matched to this
+module's real `chain_params`. Only the transport layer changed: Move's
+`schwungRemote`/`postMessage` API (which needs a manager iframe host that
+doesn't exist standalone on the Force) is replaced by plain `fetch()` calls
+to `web/server.py`, a stdlib-only Python HTTP server that bridges to
+`maze_host`'s Unix control socket. The wire-value math, knob registry, and
+every param's min/max/curve are untouched from the original - they only
+ever depended on `set_param`/`get_param` semantics, which `maze_host`
+forwards verbatim to the same `maze_voice.c` functions Move would call.
+
+One addition not in the Move original: an "Audition" strip of note buttons,
+since there's no hardware pad feeding notes into this page - it POSTs
+directly to `maze_host`'s `NOTE` control-socket command, so the voice can be
+played and heard from the browser alone before ever wiring up a MIDI track.
+
+`maze_host`'s `DESCRIBE` command (full `chain_params`/`ui_hierarchy` JSON,
+served at `/describe`) is wired up server-side but not yet consumed by
+`index.html`, which still hand-declares every knob like the original - a
+generic renderer over that JSON would be the natural next step if/when a
+second module needs the same treatment, rather than hand-porting a new
+`web_ui.html` each time.
+
+Served on port **8304** (`force-acid`'s web panel already owns 8303 -
+see `~/.claude/skills/mockbamod-module-creator/references/web-gui.md` on
+picking a port and checking for collisions).
+
 ## Not yet built
 
-- Web GUI (the other half of the original ask) - not started. `maze_host`'s
-  control socket (`SET`/`GET`/`DESCRIBE`/`NOTE`, see its header comment)
-  already returns the full `chain_params`/`ui_hierarchy` JSON straight from
-  the running instance via `get_param`, so a generic renderer over that
-  JSON is the intended approach rather than hand-mapping ~30 knobs.
 - A real (not adaptive-controller) fix for the clock-rate mismatch.
 - Control-surface feedback, a Force track template (`.xtk`) - lower
   priority than the above; see `force-acid`'s equivalents for the pattern

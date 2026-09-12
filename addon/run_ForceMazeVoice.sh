@@ -22,6 +22,9 @@ if [ "$1" = "kill" ]; then
     for p in $(ps 2>/dev/null | grep "[m]aze_host" | awk '{print $1}'); do
         kill -9 $p 2>/dev/null
     done
+    for p in $(ps 2>/dev/null | grep "[s]erver.py" | awk '{print $1}'); do
+        kill -9 $p 2>/dev/null
+    done
     if [ -f "$mmLD_PRELOAD_VAR" ]; then
         cat "$mmLD_PRELOAD_VAR" | tr " " "\n" | grep -v forceAudioIn | tr "\n" " " > /tmp/.p
         mv /tmp/.p "$mmLD_PRELOAD_VAR"
@@ -43,3 +46,12 @@ fi
 # process is exec'd, and maze_host creates it at its own startup.
 "$APPDIR/maze_host" --module-dir "$APPDIR" --ctrl-sock /tmp/maze_ctrl.sock \
     > /tmp/maze_host.log 2>&1 &
+
+# ── web control panel ───────────────────────────────────────
+# No ordering constraint (unlike maze_host above): it only needs maze_host's
+# control socket to exist by the time a browser actually asks it for
+# something, and it fails soft (503) until then. Pure stdlib server, no
+# LD_LIBRARY_PATH/mido dance needed (that's only for the bundled
+# python-rtmidi wheel, which this doesn't use).
+python3 "$APPDIR/web/server.py" --port 8304 --ctrl-sock /tmp/maze_ctrl.sock \
+    > /tmp/maze_web.log 2>&1 &

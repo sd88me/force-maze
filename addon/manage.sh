@@ -33,6 +33,9 @@ STOP() {
     for p in $(ps 2>/dev/null | grep "[m]aze_host" | awk '{print $1}'); do
         kill -9 $p 2>/dev/null
     done
+    for p in $(ps 2>/dev/null | grep "[s]erver.py" | awk '{print $1}'); do
+        kill -9 $p 2>/dev/null
+    done
     if [ -f "$mmLD_PRELOAD_VAR" ]; then
         cat "$mmLD_PRELOAD_VAR" | tr " " "\n" | grep -v forceAudioIn | tr "\n" " " > /tmp/.p
         mv /tmp/.p "$mmLD_PRELOAD_VAR"
@@ -69,5 +72,6 @@ echo
 echo "Status:"
 [ -f "$runScript" ] && echo "  autostart: ENABLED" || echo "  autostart: disabled"
 ps 2>/dev/null | grep -q "[m]aze_host" && echo "  voice: RUNNING" || echo "  voice: stopped"
-echo "  logs: /tmp/forceAudioIn.log (mix tap) and /tmp/maze_host.log (synth)"
+ps 2>/dev/null | grep -q "[s]erver.py" && echo "  web UI: RUNNING on :8304" || echo "  web UI: stopped"
+echo "  logs: /tmp/forceAudioIn.log (mix tap), /tmp/maze_host.log (synth), /tmp/maze_web.log (web UI)"
 echo "  control socket: /tmp/maze_ctrl.sock"
