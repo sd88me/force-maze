@@ -283,17 +283,42 @@ function makeKnob(item, sizeOverride) {
   let cur = fracFromWire(item, item.def);
   /* visual only — used both for user drags and for applying device updates */
   function render(frac) { cur = clamp01(frac); rotor.setAttribute("transform", "rotate(" + (-132 + cur * 264) + " 50 50)"); val.textContent = fmtValue(item, cur); }
-  /* visual + send to device */
-  function commit(frac) { render(frac); schwungRemote.setParam(P + item.key, String(quantize(item, wireRaw(item, cur)))); }
+  function sendCurrent() { schwungRemote.setParam(P + item.key, String(quantize(item, wireRaw(item, cur)))); }
+  /* visual + send to device, unthrottled — used by click/dblclick/wheel,
+   * which fire far less often than a drag's mousemove stream. */
+  function commit(frac) { render(frac); sendCurrent(); }
+
+  /* THROTTLE_MS: a drag fires one mousemove per pixel, easily 50-100/sec —
+   * each used to open a fresh HTTP request straight to the device. Fine on
+   * Move (an in-process postMessage call, not a real network round trip),
+   * but on this HTTP bridge it's what made the panel go unresponsive after
+   * a while (see server.py's ctrl_request() comment for the fd-leak half
+   * of this bug — this is the other half, the request *rate* that
+   * triggered it). Rendering stays on every mousemove for smooth visual
+   * feedback; only the network send is capped, with a guaranteed final
+   * send on release so the last value while dragging always reaches the
+   * device even if it lands mid-throttle-window. */
+  const THROTTLE_MS = 40; /* ~25 sends/sec — plenty responsive, far fewer requests */
+  let lastSend = 0, pendingSend = false;
+  function commitThrottled(frac) {
+    render(frac);
+    const now = performance.now();
+    if (now - lastSend >= THROTTLE_MS) { lastSend = now; pendingSend = false; sendCurrent(); }
+    else if (!pendingSend) {
+      pendingSend = true;
+      setTimeout(() => { pendingSend = false; lastSend = performance.now(); sendCurrent(); }, THROTTLE_MS - (now - lastSend));
+    }
+  }
 
   let dragging = false, startY = 0, startV = 0;
   function down(e) { dragging = true; startY = (e.touches ? e.touches[0].clientY : e.clientY); startV = cur; e.preventDefault();
     window.addEventListener("mousemove", move); window.addEventListener("touchmove", move, { passive: false });
     window.addEventListener("mouseup", up); window.addEventListener("touchend", up); }
   function move(e) { if (!dragging) return; const y = (e.touches ? e.touches[0].clientY : e.clientY); const speed = e.shiftKey ? 640 : 180;
-    commit(startV + (startY - y) / speed); e.preventDefault(); }
+    commitThrottled(startV + (startY - y) / speed); e.preventDefault(); }
   function up() { dragging = false; window.removeEventListener("mousemove", move); window.removeEventListener("touchmove", move);
-    window.removeEventListener("mouseup", up); window.removeEventListener("touchend", up); }
+    window.removeEventListener("mouseup", up); window.removeEventListener("touchend", up);
+    sendCurrent(); /* guaranteed final send, even if the last move() was throttled */ }
   svg.addEventListener("mousedown", down);
   svg.addEventListener("touchstart", down, { passive: false });
   svg.addEventListener("wheel", (e) => { commit(cur - Math.sign(e.deltaY) * 0.02); e.preventDefault(); }, { passive: false });

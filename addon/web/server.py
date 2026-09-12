@@ -28,15 +28,24 @@ def ctrl_request(line: str):
     """Send one line to maze_host's control socket, return its reply (or
     None if the engine isn't reachable). One connection per request -
     these are user-interaction-rate calls (knob turns, button presses),
-    nowhere near the audio thread, so the per-call connect cost is fine."""
+    nowhere near the audio thread, so the per-call connect cost is fine.
+
+    `with` guarantees the socket closes on every exit path, including a
+    connect/send/recv timeout - an earlier version only closed it on the
+    success path, leaking one fd per failed/timed-out request. Under a
+    sustained burst of calls (a knob drag fires one HTTP request per
+    mousemove, easily 50-100/sec - see index.html's THROTTLE_MS) that leak
+    was the likely cause of the panel going unresponsive after a while:
+    each leaked fd is also a lingering half-open connection maze_host's
+    single-threaded accept() loop has to get through before it can serve
+    the next real request, so throughput degrades as the leak grows."""
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(SOCK_TIMEOUT)
-        s.connect(CTRL_SOCK)
-        s.sendall((line.strip("\n") + "\n").encode("utf-8"))
-        reply = s.recv(8192)
-        s.close()
-        return reply.decode("utf-8", errors="replace").strip("\n")
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(SOCK_TIMEOUT)
+            s.connect(CTRL_SOCK)
+            s.sendall((line.strip("\n") + "\n").encode("utf-8"))
+            reply = s.recv(8192)
+            return reply.decode("utf-8", errors="replace").strip("\n")
     except OSError:
         return None
 
