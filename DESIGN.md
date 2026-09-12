@@ -135,7 +135,7 @@ correlating `forceAudioIn.so`'s own hardware-clocked read timestamps against
 wall-clock time directly, rather than inferring drift from ring backlog
 trend) before attempting adaptive correction again.
 
-## Boot race
+## Boot race (the ring one - see below for a second, unrelated one)
 
 `forceAudioIn.so`'s constructor needs the `/forceAudioInject` shared-memory
 ring to already exist the moment `MPC`'s process is `exec`'d (constructors
@@ -143,7 +143,7 @@ run at library load, before `main()`). `maze_host` must therefore start
 producing into the ring *before* MPC exists, not after - the same boot-race
 constraint `ForceLinkAudio`'s `run_ForceLinkAudio.sh` solves by arming
 `LD_PRELOAD` before backgrounding its own startup. An earlier version of
-`run_ForceMazeVoice.sh` waited for `{MPC Main Thread}` to appear before
+`run_maze_host.sh` waited for `{MPC Main Thread}` to appear before
 launching `maze_host` (copying `ForceLinkAudio`'s *network*-process startup
 pattern, which has no such ordering requirement) - that always lost the
 race, so the tap saw "passthrough-only" and MPC would need restarting again
@@ -154,6 +154,56 @@ the consumer attaches (the "boot race" head start draining into the ring
 with nothing reading it yet) - `forceAudioIn.so`'s hysteresis trim absorbs
 this on its very first `mix_in()` call, but it's also the confound behind
 the ruled-out adaptive-controller experiment above.
+
+## Boot-time LD_PRELOAD race (confirmed 2026-09-13 - the serious one)
+
+A completely different, much more consequential race, discovered after real
+overnight boot failures unrelated to any active development: pads/buttons
+dead, or WiFi dead, alternating unpredictably across successive reboots,
+sometimes fine. Traced to `/dev/shm/.LD_PRELOAD` (the file `apps.sh` reads
+into `LD_PRELOAD` before exec'ing `MPC` - see the mockbamod-module-creator
+skill's `architecture.md`).
+
+**Confirmed by reading the actual scripts on a live device**:
+`mockbaMagic`'s and `MidiLoop`'s own `run_*.sh` scripts both read this file,
+check their library isn't already present, and write the whole file back -
+with **no locking at all**. MockbaMod's own boot sequence backgrounds every
+top-level addon script concurrently (`architecture.md`: "launches every
+top-level `AddOns/*.sh` (`"$f" &`)"). Three or more unsynchronized
+read-modify-write scripts racing on one shared file at boot is a textbook
+lost-update: whichever write lands last wins, based on whatever it read,
+silently dropping another script's entry. Lose `MidiLoop`'s
+`tkgl_anyctrl_lt.so` and the control-surface remapper never loads -> dead
+pads/buttons. Lose or corrupt `mockbaMagic.so`'s entry and you get its own
+already-documented WiFi-breaking failure mode. Same race, two different
+casualties depending purely on write-ordering luck on a given boot -
+matching exactly what was observed.
+
+This bug is pre-existing in MockbaMod itself (`mockbaMagic` and `MidiLoop`
+already race each other); adding `ForceMazeVoice`'s `run_maze_host.sh` as a
+**third** unlocked writer measurably worsened the collision rate in
+practice.
+
+**Mitigation applied**: `run_maze_host.sh` and `addon/manage.sh` now wrap
+every read-modify-write of `$mmLD_PRELOAD_VAR` in an `mkdir`-based mutex
+(atomic even on busybox; bounded retry, fails OPEN rather than risking a
+hung boot on a stale lock). This makes OUR participation safe. **It cannot
+fix `mockbaMagic`/`MidiLoop`'s own unlocked writes** - they don't check for
+or respect this lock, so the underlying two-way race between them is
+unchanged.
+
+**Consequence**: the engine (`addon/manage.sh`) is currently kept
+**disabled** on the test device. Our own write is now safe, but
+re-enabling autolaunch reintroduces a third participant into a shared file
+two OTHER addons still touch unsafely, and empirically that measurably
+raised the odds of hitting the pre-existing race. Re-enable only after
+either (a) `mockbaMagic`/`MidiLoop` also adopt locking (out of scope - not
+our addons), or (b) a lower-risk approach is found (e.g. writing our entry
+without ever reading/rewriting the whole file, if MockbaMod ever exposes a
+safe primitive for that).
+
+The web panel (`web/manage.sh`) never touches `LD_PRELOAD` at all and has
+none of this risk - it stays enabled independently.
 
 ## `acvs`, not `inmusic-mpc`
 
@@ -206,6 +256,44 @@ second module needs the same treatment, rather than hand-porting a new
 Served on port **8304** (`force-acid`'s web panel already owns 8303 -
 see `~/.claude/skills/mockbamod-module-creator/references/web-gui.md` on
 picking a port and checking for collisions).
+
+**The web panel is its own addon** (`web/manage.sh` + `web/run_maze_web.sh`,
+directly copying `force-acid`'s `web/manage.sh` + `run_forceacidweb.sh`
+split), independent of the engine (`addon/manage.sh` + `run_maze_host.sh`).
+It never touches `LD_PRELOAD`, only needs `maze_host`'s control socket to
+exist by the time a browser actually asks it for something (answers 503
+until then), and uses PID-file tracking rather than a name-based
+`killall`/`pgrep` - this device runs other `python3` processes (nodeServer's
+tooling, `force-acid`'s own web panel) that a name match would also kill;
+confirmed the cost of that class of mistake the hard way already this
+project (see the reverted `SCHED_FIFO` incident above for the general
+lesson on blast radius). This split is what lets the panel stay always-on
+even while the engine is disabled (see "Boot-time LD_PRELOAD race" above).
+
+## nodeServer integration
+
+Patches the separate **nodeServer** addon (not this one) for a home-page
+quick-link and a Modules-page (`/moduler`) entry - see
+`nodeserver-integration/README.md` for exactly what's patched. Two things
+worth knowing if extending this:
+
+- The Modules page needs **no nodeServer code change at all** - it scans
+  every `AddOns/*/NSMODULE.json` and renders whatever it finds
+  (`api/endpoints/moduler/index.js`). Adding `addon/NSMODULE.json` was
+  sufficient.
+- **Gotcha, found by reading `moduler/index.js` before deploying**: its
+  autolaunch-toggle spawn call does `JSN.ARGUMENTS.map(A => A.VALUE)` and
+  passes the result straight to Node's `spawn()` - each `ARGUMENTS[].VALUE`
+  becomes exactly one argv entry; `spawn()` does not shell-split a string
+  containing a space. A value like `"--module-dir /path"` would arrive at
+  `maze_host` as one unparseable argv token, not two. `NSMODULE.json` splits
+  every flag and its value into separate array entries for this reason -
+  `force-acid`'s own `NSMODULE.json` never hit this because its one
+  argument (`-v`) has no value to split.
+- The home-page link needs a real HTTP redirect (`forcemaze.js`, exactly
+  `force-acid`'s `forceacid.js` pattern), not a plain link: `home.js`'s
+  link renderer runs every URL through the legacy global `escape()`, which
+  mangles the colon in an absolute `http://host:port/` URL.
 
 ## "Headless" control: CC map + `.xtk` track template
 

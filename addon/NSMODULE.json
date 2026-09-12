@@ -1,0 +1,17 @@
+{
+  "NAME": "Force Maze Voice",
+  "DESCRIPTION": "Moog Labyrinth-style thru-zero oscillator/wavefolder/filter voice (port of the Schwung 'Maze Voice' module for Ableton Move). Headless: control it from a Force MIDI track via CC, or from the web panel. NOTE: toggling RUNNING here only starts/stops the maze_host process itself - it does not arm the forceAudioIn.so LD_PRELOAD tap or restart acvs, so audio only reaches an Audio-In track if manage.sh ENABLE has already been run at least once this session. See README.md / CC-MAP.md.",
+  "PROCESSNAME": "maze_host",
+  "DIRNAME": "ForceMazeVoice",
+  "FILENAME": "maze_host",
+  "BACKGROUND": true,
+  "AUTOLAUNCHABLE": true,
+  "ARGUMENTS": [
+    { "NAME": "module-dir flag", "VALUE": "--module-dir" },
+    { "NAME": "module directory (chain_params/ui_hierarchy source)", "VALUE": "/media/662522/AddOns/ForceMazeVoice" },
+    { "NAME": "ctrl-sock flag", "VALUE": "--ctrl-sock" },
+    { "NAME": "control socket path", "VALUE": "/tmp/maze_ctrl.sock" },
+    { "NAME": "control-channel flag", "VALUE": "--control-channel" },
+    { "NAME": "Q-Link control channel (1-16)", "VALUE": "1" }
+  ]
+}

@@ -53,11 +53,14 @@ src/
   forceAudioInject.h      shared-memory ring layout, used by all three above
   include/plugin_api_v1.h Schwung's plugin ABI (v1 host_api, v1/v2 plugin API)
   rtmidi/                 vendored RtMidi 6 (ALSA backend)
-addon/                  MockbaMod addon: manage.sh, run_ForceMazeVoice.sh,
-                        prebuilt forceAudioIn.so + maze_host, module.json,
-                        web/ (bundled copy of the web GUI below),
-                        Force Maze Control.xtk (Q-Link track template)
-web/
+addon/                  MockbaMod addon (the ENGINE): manage.sh,
+                        run_maze_host.sh, prebuilt forceAudioIn.so +
+                        maze_host, module.json, NSMODULE.json (nodeServer
+                        Modules-page descriptor), Force Maze Control.xtk
+                        (Q-Link track template), web/ (bundled copy of the
+                        web GUI below - a separate addon in its own right)
+web/                    a SEPARATE addon (the web panel), independently
+                        enabled - see "Deploy / enable"
   index.html            control panel - ported verbatim in style/layout from
                         schwung-maze's own web_ui.html (the "rack" look,
                         SVG knobs, section layout all unchanged); only the
@@ -65,6 +68,9 @@ web/
                         swapped for fetch() calls to server.py
   server.py             stdlib-only HTTP server bridging the page to
                         maze_host's Unix control socket (SET/GET/DESCRIBE/NOTE)
+  manage.sh, run_maze_web.sh   its own ENABLE/DISABLE, PID-file based
+                                (same split + reasoning as force-acid's
+                                web/manage.sh + run_forceacidweb.sh)
 scripts/
   Dockerfile, build.sh          armhf-native (QEMU) build for maze_host,
                                 same toolchain as force-acid
@@ -74,6 +80,9 @@ scripts/
 docs/
   CC-MAP.md                      the 16 Q-Link knobs' CC assignments
   capture-xtk.md                 the .xtk format's reverse-engineering notes
+nodeserver-integration/  patches for the SEPARATE nodeServer addon (home-page
+                        link + confirms the Modules-page entry needs no
+                        patch, just NSMODULE.json) - see its own README.md
 ```
 
 ## Build
@@ -88,18 +97,34 @@ Both write straight into `addon/`, which is then ready to deploy as-is.
 ## Deploy / enable
 
 ```
+ssh root@<force-ip> 'rm -rf /media/662522/AddOns/ForceMazeVoice'   # see note below
 scp -r addon root@<force-ip>:/media/662522/AddOns/ForceMazeVoice
-ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/manage.sh ENABLE'
+ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/manage.sh ENABLE'          # the engine
+ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/web/manage.sh ENABLE'      # the web panel
 ```
 
-`ENABLE`/`DISABLE` restart the Force's `acvs` service (the main app) to
-arm/disarm the `LD_PRELOAD` tap - see `DESIGN.md` for why, and for two
-real-hardware incidents worth reading before touching this again.
+**The `rm -rf` first matters**: `scp -r addon dest` copies `addon` itself
+as a subdirectory of `dest` if `dest` already exists (`dest/addon/...`)
+rather than merging its contents into `dest` - hit this live while
+redeploying (2026-09-13). Safe to skip only when deploying to a path that
+doesn't exist yet.
+
+**The engine and the web panel are two separate addons now** (`addon/`'s
+own `manage.sh` vs. `addon/web/manage.sh`) - enabling one does not enable
+the other. The engine's `ENABLE`/`DISABLE` restarts the Force's `acvs`
+service (the main app) to arm/disarm the `LD_PRELOAD` tap - see `DESIGN.md`
+for why, and for real-hardware incidents worth reading before touching this
+again. The web panel has no such requirement and can stay always-on (like
+`force-acid`'s own web panel) even while the engine is disabled - every
+control on the page just answers 503 until the engine's control socket
+exists.
 
 Then: route a MIDI track to `Mockba Maze:In` for notes, and monitor/record
 from whichever Audio-In track corresponds to the Force's `hw:2` capture
 device (confirmed live - may enumerate differently if your USB device order
-differs). Open `http://<force-ip>:8304` for the web control panel - the
+differs). Open `http://<force-ip>:8304` for the web control panel (or use
+nodeServer's home-page "Force Maze Voice" link / Modules page, if
+nodeServer is installed - see `nodeserver-integration/README.md`) - the
 `Audition` strip at the bottom plays a note straight from the page, no MIDI
 keyboard needed to hear a change take effect.
 
@@ -113,13 +138,21 @@ Q-Link knobs. See `docs/CC-MAP.md` for the full assignment (16 of
 Working end-to-end and hardware-verified: DSP core ported, note-in (+ CC-in
 on a control channel), synthesized audio audible on a real Audio-In track,
 full web control panel (every `chain_params` knob/switch from
-`module.json`, styled and laid out exactly like the original Move version),
-plus a Q-Link track template for the 16 most-used params on physical knobs
-(structurally valid, not yet visually confirmed on a real screen - see
-`docs/capture-xtk.md`). Audio timing needed real tuning (see `DESIGN.md`
-for the full story) — currently a fixed clock-rate
+`module.json`, styled and laid out exactly like the original Move version,
+now an independently-always-on addon), a nodeServer home-page link +
+Modules-page entry, plus a Q-Link track template for the 16 most-used
+params on physical knobs (structurally valid, not yet visually confirmed on
+a real screen - see `docs/capture-xtk.md`). Audio timing needed real tuning
+(see `DESIGN.md` for the full story) — currently a fixed clock-rate
 correction plus a generous ~100/200ms ring buffer, not yet a fully "locked"
 adaptive solution.
+
+**The engine (`addon/manage.sh`) is currently DISABLED on the test device**
+pending a fix for a confirmed boot-time race condition shared with
+MockbaMod's own `mockbaMagic`/`MidiLoop` addons (see `DESIGN.md`'s "Boot-time
+LD_PRELOAD race" section) - re-enabling it before that's fixed risks the
+same intermittent dead-pads/dead-WiFi symptom on reboot. The web panel has
+no such dependency and stays enabled.
 
 ## License
 

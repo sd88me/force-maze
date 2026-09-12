@@ -11,7 +11,7 @@
 #
 # Only one of ForceAudioIn / ForceMazeVoice should be enabled at a time.
 
-appname=ForceMazeVoice
+appname=maze_host
 appTitle="Force Maze Voice"
 appDir=ForceMazeVoice
 
@@ -29,17 +29,32 @@ echo "
 ***********************************************************
 "
 
+# See run_maze_host.sh for why this lock exists: mockbaMagic's and
+# MidiLoop's own scripts read-modify-write this same file with no locking,
+# concurrently at boot - a confirmed, observed lost-update race. This can't
+# fix their side of it, only make ours safe.
+PRELOAD_LOCK="/dev/shm/.LD_PRELOAD.lock"
+lock_preload() {
+    i=0
+    while ! mkdir "$PRELOAD_LOCK" 2>/dev/null; do
+        i=$((i + 1))
+        [ $i -ge 50 ] && return 1
+        sleep 0.1
+    done
+    return 0
+}
+unlock_preload() { rmdir "$PRELOAD_LOCK" 2>/dev/null; }
+
 STOP() {
     for p in $(ps 2>/dev/null | grep "[m]aze_host" | awk '{print $1}'); do
         kill -9 $p 2>/dev/null
     done
-    for p in $(ps 2>/dev/null | grep "[s]erver.py" | awk '{print $1}'); do
-        kill -9 $p 2>/dev/null
-    done
+    lock_preload
     if [ -f "$mmLD_PRELOAD_VAR" ]; then
-        cat "$mmLD_PRELOAD_VAR" | tr " " "\n" | grep -v forceAudioIn | tr "\n" " " > /tmp/.p
-        mv /tmp/.p "$mmLD_PRELOAD_VAR"
+        cat "$mmLD_PRELOAD_VAR" | tr " " "\n" | grep -v forceAudioIn | tr "\n" " " > /tmp/.p.$$
+        mv /tmp/.p.$$ "$mmLD_PRELOAD_VAR"
     fi
+    unlock_preload
 }
 
 if [ "$mode" = "UNINSTALL" ]; then
@@ -72,6 +87,6 @@ echo
 echo "Status:"
 [ -f "$runScript" ] && echo "  autostart: ENABLED" || echo "  autostart: disabled"
 ps 2>/dev/null | grep -q "[m]aze_host" && echo "  voice: RUNNING" || echo "  voice: stopped"
-ps 2>/dev/null | grep -q "[s]erver.py" && echo "  web UI: RUNNING on :8304" || echo "  web UI: stopped"
-echo "  logs: /tmp/forceAudioIn.log (mix tap), /tmp/maze_host.log (synth), /tmp/maze_web.log (web UI)"
+echo "  web UI is a separate addon now - see web/manage.sh (survives this being disabled)"
+echo "  logs: /tmp/forceAudioIn.log (mix tap), /tmp/maze_host.log (synth)"
 echo "  control socket: /tmp/maze_ctrl.sock"
