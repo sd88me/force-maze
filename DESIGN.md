@@ -207,9 +207,40 @@ Served on port **8304** (`force-acid`'s web panel already owns 8303 -
 see `~/.claude/skills/mockbamod-module-creator/references/web-gui.md` on
 picking a port and checking for collisions).
 
+## "Headless" control: CC map + `.xtk` track template
+
+`maze_host` originally only parsed Note-On (matching `maze_voice.c`'s own
+`on_midi`, which ignores everything else). Added a `PARAMS[]` CC dispatch
+table (`src/maze_host.cpp`, modeled directly on `force-acid`'s
+`host_shim.cpp` equivalent) so a Force MIDI track can drive it by CC on a
+configurable control channel (`--control-channel`, default 1) - this
+project's own established term for that pattern is "headless": no
+on-screen GUI of its own, controlled from a Force MIDI track (see
+`force-acid`'s `NSMODULE.json`).
+
+One Q-Link bank is 16 knobs; `maze_voice.c` has ~30 `chain_params`, so
+`docs/CC-MAP.md` picks the 16 most commonly-tweaked ones (spread across
+Oscillator/Wavefolder/Filter/Output, plus the Generate trigger) - the rest
+stay reachable only from the web panel. `scripts/build_xtk.py` (adapted
+from `force-acid`'s script of the same name; `scripts/xtk-seed.json` is
+identical generic Force boilerplate, not acid-specific) generates
+`addon/Force Maze Control.xtk` from that same table, so the CC numbers
+can't drift out of sync between the track template and what `maze_host`
+actually listens for.
+
+**Same caveat as force-acid's own `.xtk`**: reverse-engineered from one
+sample file (see `docs/capture-xtk.md`), structurally valid (round-trips
+through gzip/JSON, matches the real file's shape) but **not yet visually
+confirmed on a real screen** - load it once and check that knob names/
+ranges look right and Generate behaves as a momentary trigger, not a
+sticky value.
+
 ## Not yet built
 
 - A real (not adaptive-controller) fix for the clock-rate mismatch.
-- Control-surface feedback, a Force track template (`.xtk`) - lower
-  priority than the above; see `force-acid`'s equivalents for the pattern
-  if picked up later.
+- Control-surface feedback (CC/value echoed back out, e.g. so the web panel
+  or a controller with LED feedback shows the device's *true* current value
+  rather than just "whatever was last sent") - see `force-acid`'s
+  `send_feedback_cc`/`FEEDBACK_CHANNEL` for the pattern if picked up later.
+- Visual confirmation that `Force Maze Control.xtk` actually loads and
+  displays correctly on a real Force screen.

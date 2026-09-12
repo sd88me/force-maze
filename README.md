@@ -15,7 +15,7 @@ Audio-In track.
 ## How it works
 
 ```
-Mockba Maze:In (virtual MIDI port, notes only)
+Mockba Maze:In (virtual MIDI port, notes + CC)
         │
         ▼
 maze_host  ──renders──▶  maze_voice.c (verbatim DSP core, Schwung's plugin API v2)
@@ -55,7 +55,8 @@ src/
   rtmidi/                 vendored RtMidi 6 (ALSA backend)
 addon/                  MockbaMod addon: manage.sh, run_ForceMazeVoice.sh,
                         prebuilt forceAudioIn.so + maze_host, module.json,
-                        web/ (bundled copy of the web GUI below)
+                        web/ (bundled copy of the web GUI below),
+                        Force Maze Control.xtk (Q-Link track template)
 web/
   index.html            control panel - ported verbatim in style/layout from
                         schwung-maze's own web_ui.html (the "rack" look,
@@ -69,6 +70,10 @@ scripts/
                                 same toolchain as force-acid
   build_audiotap.sh             zig cross-build for forceAudioIn.so/injectTone
                                 (no Docker needed - see script header)
+  build_xtk.py, xtk-seed.json    generates addon/Force Maze Control.xtk
+docs/
+  CC-MAP.md                      the 16 Q-Link knobs' CC assignments
+  capture-xtk.md                 the .xtk format's reverse-engineering notes
 ```
 
 ## Build
@@ -98,13 +103,21 @@ differs). Open `http://<force-ip>:8304` for the web control panel - the
 `Audition` strip at the bottom plays a note straight from the page, no MIDI
 keyboard needed to hear a change take effect.
 
+For physical knob control: a MIDI track named `MAZE CTRL` → `Mockba Maze:In`
+ch 1, with `addon/Force Maze Control.xtk` loaded onto it for 16 pre-named
+Q-Link knobs. See `docs/CC-MAP.md` for the full assignment (16 of
+`maze_voice.c`'s ~30 params - the rest stay web-only) and setup steps.
+
 ## Status
 
-Working end-to-end and hardware-verified: DSP core ported, note-in,
-synthesized audio audible on a real Audio-In track, full web control panel
-(every `chain_params` knob/switch from `module.json`, styled and laid out
-exactly like the original Move version). Audio timing needed real tuning
-(see `DESIGN.md` for the full story) — currently a fixed clock-rate
+Working end-to-end and hardware-verified: DSP core ported, note-in (+ CC-in
+on a control channel), synthesized audio audible on a real Audio-In track,
+full web control panel (every `chain_params` knob/switch from
+`module.json`, styled and laid out exactly like the original Move version),
+plus a Q-Link track template for the 16 most-used params on physical knobs
+(structurally valid, not yet visually confirmed on a real screen - see
+`docs/capture-xtk.md`). Audio timing needed real tuning (see `DESIGN.md`
+for the full story) — currently a fixed clock-rate
 correction plus a generous ~100/200ms ring buffer, not yet a fully "locked"
 adaptive solution.
 

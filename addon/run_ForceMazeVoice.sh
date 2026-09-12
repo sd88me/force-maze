@@ -44,7 +44,7 @@ fi
 # See ForceAudioIn's run script for why: forceAudioIn.so's constructor needs
 # the /forceAudioInject shared-memory ring to already exist the moment MPC's
 # process is exec'd, and maze_host creates it at its own startup.
-"$APPDIR/maze_host" --module-dir "$APPDIR" --ctrl-sock /tmp/maze_ctrl.sock \
+"$APPDIR/maze_host" --module-dir "$APPDIR" --ctrl-sock /tmp/maze_ctrl.sock --control-channel 1 \
     > /tmp/maze_host.log 2>&1 &
 
 # ── web control panel ───────────────────────────────────────

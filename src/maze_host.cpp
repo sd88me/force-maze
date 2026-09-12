@@ -40,6 +40,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -68,6 +69,68 @@ static std::atomic<uint64_t> g_ring_drops{0};
 static std::string g_chain_params_json;
 static std::string g_ctrl_sock_path = "/tmp/maze_ctrl.sock";
 static bool         g_verbose = false;
+
+/* ---------------------------------------------------------------------------
+ * CC -> set_param, for a Force Q-Link-mapped MIDI track ("headless" control -
+ * this project's own term, see NSMODULE.json/README: no on-screen GUI of its
+ * own, driven by a Force MIDI track). One Q-Link bank is 16 knobs, so this
+ * picks the 16 most useful of maze_voice's ~30 chain_params (module.json) -
+ * the rest stay reachable only from the web panel. Values/ranges/curve match
+ * module.json exactly (mod_freq is the one param with a log curve - see
+ * web/index.html's identical wireRaw() for the same formula at the UI layer).
+ * kind: 'f' float linear, 'g' float log (mod_freq only), 'w' write-only
+ * momentary trigger (rnd_go).
+ * ------------------------------------------------------------------------- */
+struct ParamSpec {
+    const char *key;
+    char        kind;
+    double      lo, hi;
+    int         cc;
+};
+static const ParamSpec PARAMS[] = {
+    { "vco_tune",    'f', -24,  24,   20 },
+    { "mod_freq",    'g', 0.2, 1300,  21 },
+    { "fm_depth",    'f', 0,   100,   22 },
+    { "vco_eg1",     'f', -100, 100,  23 },
+    { "mod_eg1",     'f', -100, 100,  24 },
+    { "env1_decay",  'f', 0,   100,   25 },
+    { "env2_decay",  'f', 0,   100,   26 },
+    { "fold_drive",  'f', 0,   100,   27 },
+    { "fold_bias",   'f', -100, 100,  28 },
+    { "blend",       'f', -100, 100,  29 },
+    { "cutoff",      'f', 0,   100,   30 },
+    { "reso",        'f', 0,   100,   31 },
+    { "filter_mode", 'f', 0,   100,   32 },
+    { "vco_lvl",     'f', 0,   200,   33 },
+    { "level",       'f', 0,   100,   34 },
+    { "rnd_go",      'w', 0,   1,     35 },
+};
+static const int N_PARAMS = (int)(sizeof(PARAMS) / sizeof(PARAMS[0]));
+static std::unordered_map<int, int> g_cc2param;  /* CC -> index into PARAMS, built at startup */
+static int g_ctrl_ch = 0;                        /* 0-based; --control-channel is 1-16 */
+
+static void apply_cc(int idx, int value /* 0..127 */) {
+    const ParamSpec &p = PARAMS[idx];
+    char buf[32];
+    switch (p.kind) {
+        case 'w':
+            if (value < 64) return;   /* only the press, not the release */
+            std::snprintf(buf, sizeof(buf), "go");
+            break;
+        case 'g': {
+            double v = p.lo * std::pow(p.hi / p.lo, value / 127.0);
+            std::snprintf(buf, sizeof(buf), "%.4f", v);
+            break;
+        }
+        default: {
+            double v = p.lo + (p.hi - p.lo) * (value / 127.0);
+            std::snprintf(buf, sizeof(buf), "%.4f", v);
+            break;
+        }
+    }
+    { std::lock_guard<std::mutex> lk(g_lock); g_api->set_param(g_inst, p.key, buf); }
+    if (g_verbose) fprintf(stderr, "[maze] cc %d -> %s = %s\n", p.cc, p.key, buf);
+}
 
 /* ---------------------------------------------------------------------------
  * Shared-memory ring setup (producer side -- mirrors injectTone.c, but with
@@ -118,13 +181,26 @@ static void ring_push(const float *interleaved, uint32_t frames) {
 }
 
 /* ---------------------------------------------------------------------------
- * RtMidi input -- notes only (maze_voice ignores note-off; it's a
- * decay-envelope monosynth, see maze_voice.c's on_midi comment).
+ * RtMidi input -- notes (maze_voice ignores note-off; it's a decay-envelope
+ * monosynth, see maze_voice.c's on_midi comment) plus Control Change on the
+ * control channel, for a Q-Link-mapped MIDI track (see PARAMS[] above).
  * ------------------------------------------------------------------------- */
 static void on_midi_cb(double /*dt*/, std::vector<unsigned char> *msg, void * /*ud*/) {
-    if (!msg || msg->size() < 1) return;
+    if (!msg || msg->empty()) return;
+    const uint8_t *b = msg->data();
+    size_t len = msg->size();
+    uint8_t status = b[0];
+    uint8_t type = status & 0xF0;
+    uint8_t chan = status & 0x0F;
+
+    if (type == 0xB0 && len >= 3 && chan == (uint8_t)g_ctrl_ch) {
+        auto it = g_cc2param.find(b[1]);
+        if (it != g_cc2param.end()) apply_cc(it->second, b[2]);
+        return;   /* CC never reaches maze_voice.c's on_midi - it only looks at notes anyway */
+    }
+
     std::lock_guard<std::mutex> lk(g_lock);
-    g_api->on_midi(g_inst, msg->data(), (int)msg->size(), 0 /* MOVE_MIDI_SOURCE_INTERNAL */);
+    g_api->on_midi(g_inst, b, (int)len, 0 /* MOVE_MIDI_SOURCE_INTERNAL */);
 }
 
 /* ---------------------------------------------------------------------------
@@ -331,10 +407,11 @@ static void on_signal(int) { g_run.store(false); }
 static void usage(const char *me) {
     fprintf(stderr,
         "usage: %s [options]\n"
-        "  -v                 verbose\n"
-        "  --client NAME      ALSA client name       (default: Mockba Maze)\n"
-        "  --module-dir PATH  dir containing module.json (default: .)\n"
-        "  --ctrl-sock PATH   control socket path     (default: /tmp/maze_ctrl.sock)\n",
+        "  -v                    verbose\n"
+        "  --client NAME         ALSA client name       (default: Mockba Maze)\n"
+        "  --module-dir PATH     dir containing module.json (default: .)\n"
+        "  --ctrl-sock PATH      control socket path     (default: /tmp/maze_ctrl.sock)\n"
+        "  --control-channel N   1-16, CC-in for the Q-Link track (default: 1)\n",
         me);
 }
 
@@ -348,8 +425,11 @@ int main(int argc, char **argv) {
         else if (a == "--client"     && i+1 < argc) client = argv[++i];
         else if (a == "--module-dir" && i+1 < argc) module_dir = argv[++i];
         else if (a == "--ctrl-sock"  && i+1 < argc) g_ctrl_sock_path = argv[++i];
+        else if (a == "--control-channel" && i+1 < argc) g_ctrl_ch = (std::atoi(argv[++i]) - 1) & 0x0F;
         else { usage(argv[0]); return (a == "-h" || a == "--help") ? 0 : 2; }
     }
+
+    for (int i = 0; i < N_PARAMS; i++) g_cc2param[PARAMS[i].cc] = i;
 
     if (!shm_setup()) { fprintf(stderr, "[maze] shared memory setup failed\n"); return 1; }
 
@@ -387,10 +467,10 @@ int main(int argc, char **argv) {
     std::signal(SIGTERM, on_signal);
 
     fprintf(stderr,
-        "[maze] up. port '%s:In'  ctrl socket %s  shm %s\n"
-        "[maze] route a MIDI track to '%s:In' for notes; audio is mixed into\n"
-        "[maze] the Force's capture input via ForceAudioIn (must be enabled).\n",
-        client.c_str(), g_ctrl_sock_path.c_str(), AI_SHM_NAME, client.c_str());
+        "[maze] up. port '%s:In'  ctrl socket %s  shm %s  ctrl ch %d\n"
+        "[maze] route a MIDI track to '%s:In' for notes and CC (Q-Link); audio\n"
+        "[maze] is mixed into the Force's capture input via ForceAudioIn (must be enabled).\n",
+        client.c_str(), g_ctrl_sock_path.c_str(), AI_SHM_NAME, g_ctrl_ch + 1, client.c_str());
 
     std::thread timer(timer_loop);
     std::thread ctrl(ctrl_server_loop, lfd);
