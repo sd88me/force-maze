@@ -93,7 +93,12 @@ Or skip the hardware knobs entirely and use the web panel at
 
 ## Status
 
-**Built for armhf and hardware-verified (2026-09-13).** Native logic smoke
+**v0.9 (2026-09-14)** — built for armhf, deployed, and hardware-verified end
+to end, including the web panel's engine Start/Stop and nodeServer home-page
+link. Held back from v1 pending a final tidy-up pass (removing
+development-only references) and any tweaks from further hands-on testing.
+
+Native logic smoke
 test passes (`tests/run.sh`): sequencing, note on/off balance, independent
 per-sequencer output channel, and the state-persistence round-trip (save →
 reload → same channels/lengths) all verified on the host architecture.
