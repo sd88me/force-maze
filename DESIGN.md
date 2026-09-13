@@ -361,6 +361,19 @@ sticky value.
 
 ## Multiple simultaneous voices (per-voice mix control, not a central mixer)
 
+**Confirmed live on real hardware (2026-09-13).** Until this, every claim
+in this section had only been unit-tested (`tests/test_mix.c`, synthetic
+in-process structs) - never two real voices at once on the device. Ran
+`maze_host` (slot 0, via the nodeServer Modules page) alongside
+`ForceAudioIn`'s own `injectTone` (slot 1, `--channel R`, also via its own
+Modules-page toggle, no `acvs` restart for either): both were audible
+simultaneously, and `/proc/<MPC-pid>/maps` confirmed both
+`/forceAudioInject0` and `/forceAudioInject1` live and current (alongside
+several harmlessly-leaked `(deleted)` mappings from earlier stop/restart
+cycles - see the segment-replacement fix above). This is the first real
+confirmation the multi-voice mixer works end to end, not just in the unit
+test.
+
 `forceAudioIn.so` mixes up to `AI_MAX_VOICES` (4) independent voice hosts at
 once, each in its own named shared-memory ring (`/forceAudioInject0`,
 `/forceAudioInject1`, ...) - see `forceAudioInject.h`. Every ring stays
