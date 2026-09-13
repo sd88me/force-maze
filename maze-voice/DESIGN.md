@@ -576,6 +576,61 @@ running forever. If it doesn't help, that rules out simple "we're just too
 fast" and points back toward something more specific about what the
 accidental CPU/scheduling perturbation actually did.
 
+## A separate bug found and fixed along the way: boot.sh's LD_PRELOAD read race
+
+While chasing the above, live testing turned up a genuinely different bug:
+`boot.sh` backgrounds every addon script, then reads `$mmLD_PRELOAD_VAR`
+into the `LD_PRELOAD` env var on a fixed schedule (a bare `sleep 1`)
+before `exec`-ing `MPC` - with no guarantee every addon's write has landed
+by then. This is a **read-vs-write** race, distinct from the
+write-vs-write lost-update race the `mkdir`-lock (see
+`mockbamod-module-creator`'s `gotchas.md`) already fixes - that lock stops
+writers clobbering each other, it does nothing to guarantee they're all
+*done* by the time this one read happens.
+
+Confirmed via `/proc/<MPC-pid>/environ` (not just `cat`-ing the file,
+which always looked correct moments later, independent of what `MPC`
+actually received): `MPC` launched with `forceAudioIn.so` missing from
+its own `LD_PRELOAD`, even with the file itself showing correct content
+by the time anyone checked - this is why every earlier "is `LD_PRELOAD`
+correct" check in this doc, all of which only ever `cat`'d the file, could
+never have caught this. Fixed in `boot_old.sh` (the real live boot
+sequence, in the `sd88me/MockbaMod` fork) by polling for the file's
+*content* to stay unchanged across several consecutive checks (a bare
+"is the lock free" poll was tried first and confirmed insufficient - the
+lock can be momentarily free between two different addons' sequential
+turns). See that fork's `gotchas.md` case study for the full detail.
+
+**Important: this did not turn out to explain the pads-dead investigation
+below.** A restart with this fix in place and *verified*-correct
+`LD_PRELOAD` (via `/proc/environ`, not just the file) still killed pads
+when a real voice was attached and survived the whole restart. The two
+bugs are independent - this one is real and worth having fixed, but the
+actual pads mechanism is still whatever the rest of this section
+describes, unresolved.
+
+**A third, separate finding from the same session: `maze_host` started
+via the nodeServer Modules page is a member of `acvs.service`'s own
+systemd cgroup, and dies on every `acvs` restart as a result.** `nodeServer`
+spawns it with `detached: true` (`child_process.spawn`), which calls
+`setsid()` - that changes session/process-group membership, but NOT
+cgroup membership. Since the whole chain (`acvs`'s `ExecStart` ->
+`az01-launch-MPC` -> `boot.sh` -> `run_nodeserver.sh` -> `node` ->
+`maze_host`) is all forked descendants of `acvs`'s own `ExecStart`
+process, `maze_host` starts life inside `/system.slice/acvs.service`'s
+cgroup and never leaves it - confirmed directly via
+`/sys/fs/cgroup/system.slice/acvs.service/cgroup.procs`. `acvs.service`
+has `KillMode=control-group`, so stopping/restarting it signals **every
+process in that cgroup**, `maze_host` included, regardless of Unix
+parent-child signal rules. A `maze_host` started directly (e.g. a plain
+backgrounded shell command over SSH, not through `node`) does NOT end up
+in this cgroup and survives an `acvs` restart fine - this was how the two
+different restart-1/restart-2 results above were produced. Not something
+to "fix" in `maze_host` itself (there's no clean way for a spawned child
+to opt out of its ancestor's cgroup); just a fact worth knowing when
+interpreting whether a given restart's "voice attached" state was ever
+genuinely live throughout.
+
 ## Shipped baseline: zero-voices-at-boot + on-demand start (2026-09-13)
 
 The controlled delay experiment above was run live: 300ms, 2 restarts with
