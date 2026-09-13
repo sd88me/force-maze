@@ -195,10 +195,15 @@ backend) + system ALSA (`libasound.so.2`).
       actually started fine; only the SSH client was stuck waiting for
       that fd to close). Both stdout and stderr now redirect to
       `/tmp/maze_seq_host.log`.
-- [ ] a real MIDI clock (Force transport track → `Mockba Maze Seq In`)
-      driving playback end-to-end on hardware — verified so far via the
-      native smoke test's synthetic clock and via direct param SET/GET,
-      not yet with real transport
+- [x] a real MIDI clock (Force transport → `Mockba Maze Seq In`) driving
+      playback end-to-end on hardware — confirmed live: with only Track
+      (not Clock) enabled on that port the engine correctly never sets its
+      `running` flag (no `0xFA`/`0xFB` ever arrives) and the web panel
+      correctly shows "Stopped" even while the Force is visibly playing;
+      enabling **Clock** on `Mockba Maze Seq In` fixed it, and both
+      sequencers' play-heads/step patterns were observed advancing live
+      through `GET /state`. This is a real setup gotcha, not a bug - now
+      called out explicitly in `README.md`'s deploy steps.
 - [ ] visually confirm `addon/Force Maze Seq Control.xtk` on a real screen
       (see `docs/capture-xtk.md`)
 - [ ] parameter feedback (CC out, mirroring `force-acid`'s v0.2 channel-16

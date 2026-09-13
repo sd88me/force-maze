@@ -77,12 +77,17 @@ ssh root@<force-ip> '/media/662522/AddOns/ForceMazeSeq/manage.sh ENABLE'
 ssh root@<force-ip> '/media/662522/AddOns/ForceMazeSeq/web/manage.sh ENABLE'   # the web panel
 ```
 
-Then on the Force: Preferences → MIDI, enable Sync+Track on `Mockba Maze Seq In`
-and Track on `Mockba Maze Seq Out`; a MIDI track named `MAZE SEQ CTRL` →
-`Mockba Maze Seq In` ch 1 for CC control (load `Force Maze Seq Control.xtk`
-onto it for pre-named knobs); one or two instrument tracks ← `Mockba Maze
-Seq Out`, on whichever channel(s) `s1_channel`/`s2_channel` are set to
-(both default to 1); enable Sync+Clock on the Force transport; press Play.
+Then on the Force: Preferences → MIDI, enable **Clock** (not just Track) on
+`Mockba Maze Seq In` — this is the one that's easy to miss and the engine
+has no other way to know the transport is running (`maze_seq_core.c` only
+sets its internal `running` flag on an actual `0xFA`/`0xFB` Start/Continue
+byte; with Clock off it never arrives, no notes are ever generated, and the
+web panel correctly shows "Stopped" even while the Force is visibly
+playing). Also enable Track on `Mockba Maze Seq Out`; a MIDI track named
+`MAZE SEQ CTRL` → `Mockba Maze Seq In` ch 1 for CC control (load
+`Force Maze Seq Control.xtk` onto it for pre-named knobs); one or two
+instrument tracks ← `Mockba Maze Seq Out`, on whichever channel(s)
+`s1_channel`/`s2_channel` are set to (both default to 1); press Play.
 Or skip the hardware knobs entirely and use the web panel at
 `http://<force-ip>:8305`.
 
@@ -95,8 +100,11 @@ reload → same channels/lengths) all verified on the host architecture.
 Deployed to a live Force: both addons enable cleanly, `maze_seq_host`'s
 virtual ALSA ports register, and the web panel's SET/GET round-trips
 against the real running engine (confirmed live: `s2_channel`, `s1_length`).
-Not yet confirmed on hardware: a real MIDI clock track driving playback, and
-the `.xtk` template on a real touchscreen — see `DESIGN.md`'s TODO list.
+Real transport clock confirmed too: both sequencers' play-heads observed
+advancing live via `GET /state` once **Clock** was enabled on
+`Mockba Maze Seq In` (see the deploy steps above — Track alone isn't
+enough). Not yet confirmed on hardware: the `.xtk` template on a real
+touchscreen — see `DESIGN.md`'s TODO list.
 
 ## License
 
