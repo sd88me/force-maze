@@ -11,7 +11,12 @@
  * end-to-end: if the tone shows up in forceAudioIn.so's logged peak/consumed
  * counters (or audibly on an Audio-In track), the mechanism works.
  *
- * Usage: injectTone [freqHz] [gain0to1] [channels(1|2)]
+ * `--slot N` (default 0) picks which voice slot's shared-memory segment this
+ * instance creates, so it can also be used to smoke-test forceAudioIn.so's
+ * multi-voice mixing (e.g. run two instances at different `--slot`/freq/
+ * `--channel` to confirm they mix independently).
+ *
+ * Usage: injectTone [freqHz] [gain0to1] [channels(1|2)] [--slot N] [--channel L|R|LR]
  *
  * BUILD:
  *   zig cc -target arm-linux-gnueabihf.2.39 -O2 \
@@ -38,16 +43,31 @@ static void on_sig(int s) { (void)s; g_run = 0; }
 
 int main(int argc, char **argv)
 {
-    double freq = (argc > 1) ? atof(argv[1]) : 440.0;
-    double gain = (argc > 2) ? atof(argv[2]) : 0.2;
-    unsigned channels = (argc > 3) ? (unsigned)atoi(argv[3]) : 1;
+    double freq = (argc > 1 && argv[1][0] != '-') ? atof(argv[1]) : 440.0;
+    double gain = (argc > 2 && argv[2][0] != '-') ? atof(argv[2]) : 0.2;
+    unsigned channels = (argc > 3 && argv[3][0] != '-') ? (unsigned)atoi(argv[3]) : 1;
     if (channels < 1 || channels > AI_MAX_CH) channels = 1;
+
+    unsigned slot = 0;
+    uint32_t chan_mask = AI_CHAN_LR;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--slot") && i + 1 < argc) {
+            slot = (unsigned)atoi(argv[++i]);
+            if (slot >= AI_MAX_VOICES) slot = 0;
+        } else if (!strcmp(argv[i], "--channel") && i + 1 < argc) {
+            const char *v = argv[++i];
+            chan_mask = !strcmp(v, "L") ? AI_CHAN_L : !strcmp(v, "R") ? AI_CHAN_R : AI_CHAN_LR;
+        }
+    }
 
     signal(SIGINT, on_sig);
     signal(SIGTERM, on_sig);
 
-    shm_unlink(AI_SHM_NAME); /* start clean - we are the sole producer */
-    int fd = shm_open(AI_SHM_NAME, O_CREAT | O_RDWR, 0666);
+    char shm_name[24];
+    ai_shm_name(slot, shm_name, sizeof(shm_name));
+
+    shm_unlink(shm_name); /* start clean - we are the sole producer for this slot */
+    int fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
     if (fd < 0) { perror("shm_open"); return 1; }
     if (ftruncate(fd, AI_SHM_BYTES) != 0) { perror("ftruncate"); return 1; }
     ai_shm_t *shm = mmap(NULL, AI_SHM_BYTES, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -57,10 +77,13 @@ int main(int argc, char **argv)
     memset(shm, 0, AI_SHM_BYTES);
     shm->rate = GEN_RATE;
     shm->channels = channels;
+    shm->enabled = 1;
+    shm->gain = 1.0f;
+    shm->channel_mask = chan_mask;
     __atomic_store_n(&shm->magic, AI_MAGIC, __ATOMIC_RELEASE);
 
-    printf("[injectTone] writing %.1f Hz tone at gain %.2f, %u ch, %u Hz into %s\n",
-           freq, gain, channels, (unsigned)GEN_RATE, AI_SHM_NAME);
+    printf("[injectTone] writing %.1f Hz tone at gain %.2f, %u ch, %u Hz into %s (slot %u, chan mask %u)\n",
+           freq, gain, channels, (unsigned)GEN_RATE, shm_name, slot, chan_mask);
 
     double phase = 0.0;
     const double phase_inc = 2.0 * M_PI * freq / GEN_RATE;
@@ -107,7 +130,7 @@ int main(int argc, char **argv)
     }
 
     munmap(shm, AI_SHM_BYTES);
-    shm_unlink(AI_SHM_NAME);
+    shm_unlink(shm_name);
     printf("[injectTone] stopped\n");
     return 0;
 }

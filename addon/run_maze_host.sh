@@ -7,9 +7,26 @@
 # Same shape as ForceAudioIn's run script (its own copy of forceAudioIn.so
 # is bundled here so this addon is self-contained) but the producer is
 # maze_host — a ported Schwung DSP synth voice — instead of the injectTone
-# test tone. Only one of ForceAudioIn / ForceMazeVoice should be enabled at
-# a time: both would otherwise fight over the same LD_PRELOAD entry name and
-# the same /forceAudioInject shared-memory ring.
+# test tone.
+#
+# MULTIPLE SIMULTANEOUS VOICES (see forceAudioInject.h): forceAudioIn.so
+# itself now attaches to every voice slot 0..AI_MAX_VOICES-1 that has a
+# shared-memory segment present and mixes them all in - so several voice
+# hosts (each maze_host or similar, each given a distinct --mix-slot) CAN
+# run at once. But forceAudioIn.so, the LD_PRELOAD shim, only needs to be
+# armed ONCE - it is not per-voice. Only ONE addon (whichever one is
+# designated the tap owner - by default this one, at --mix-slot 0) should
+# run the "ARM THE TAP FIRST" section below; every additional voice addon
+# must skip its own copy of that section entirely and just launch its own
+# host binary with a different --mix-slot. Two addons both arming
+# forceAudioIn.so would not merely be redundant: run_*.sh's own
+# `grep -v forceAudioIn` rewrite of $mmLD_PRELOAD_VAR (below) strips ANY
+# existing forceAudioIn entry by substring before adding its own, so two
+# such scripts running concurrently at boot race exactly like
+# mockbaMagic/MidiLoop already do (see DESIGN.md's "Boot-time LD_PRELOAD
+# race") - whichever runs last silently drops the other's line, and if
+# THAT script's own library then never got added, forceAudioIn.so may not
+# load into MPC at all.
 ############################################################
 
 mmPath=$(cat /dev/shm/.mmPath)
@@ -70,16 +87,35 @@ else
 fi
 unlock_preload
 
-# ── start the synth NOW, not after MPC comes up ────────────
-# See ForceAudioIn's run script for why: forceAudioIn.so's constructor needs
-# the /forceAudioInject shared-memory ring to already exist the moment MPC's
-# process is exec'd, and maze_host creates it at its own startup.
-"$APPDIR/maze_host" --module-dir "$APPDIR" --ctrl-sock /tmp/maze_ctrl.sock --control-channel 1 \
-    > /tmp/maze_host.log 2>&1 &
-
-# The web control panel is now a SEPARATE, independently-enabled addon
+# ── deliberately NOT starting maze_host here (2026-09-13) ──
+# Every previous version of this script started maze_host right here, at
+# boot, alongside arming the tap. That is now KNOWN UNSAFE: see DESIGN.md's
+# "Open incident" section - restarting `acvs` while a voice ring is
+# attached reliably kills pads (sometimes wifi), on the very first restart,
+# every time this has been tested, regardless of forceAudioIn.so's own
+# build/version. forceAudioIn.so armed with ZERO voices attached, by
+# contrast, has survived every repeated-restart test run against it.
+#
+# So the split that's actually safe: this script arms the tap (above) with
+# nothing attached yet, and maze_host is started SEPARATELY, on demand,
+# through the nodeServer Modules page (see NSMODULE.json - its RUNNING
+# toggle only starts/stops the maze_host process directly, it does not
+# touch $mmLD_PRELOAD_VAR or restart acvs). forceAudioIn.so's lazy re-attach
+# (its background thread, added specifically for this) picks up the ring
+# maze_host creates within ~2s of it starting, with no restart needed -
+# confirmed working via /proc/<MPC-pid>/maps showing the ring mmap'd in
+# shortly after a post-boot start.
+#
+# The hard rule this depends on: once a voice has been started this way,
+# do not restart acvs again until it's been stopped (again via the Modules
+# page) - every live test of "acvs restart while a voice is attached" has
+# failed, with no known safe exception yet. This is a real operational
+# constraint, not just a recommendation - see DESIGN.md before changing
+# this.
+#
+# The web control panel is a SEPARATE, independently-enabled addon
 # (web/manage.sh + web/run_maze_web.sh, same split force-acid uses for its
 # own web panel) - it doesn't need maze_host running to serve the page (it
 # just answers 503 on /param et al until maze_host's control socket exists),
-# so it can stay always-on even while this engine is disabled. See
-# web/README.md.
+# so it can stay always-on regardless of whether a voice is currently
+# started. See web/README.md.

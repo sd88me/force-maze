@@ -94,6 +94,8 @@
   .order-seg.active { background: linear-gradient(155deg, var(--metal-hi), var(--metal-lo)); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3); }
   .order-seg.active svg { opacity: 1; }
   .order-seg:not(.active) svg { filter: invert(1); }
+  .mix-chan-seg { width: 24px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 9px; font-weight: 600; color: var(--ink-dim); }
+  .mix-chan-seg.active { color: var(--plate); }
 
   /* ------------------------------------------------------------------ */
   /* Bottom strip — Randomise                                            */
@@ -368,6 +370,40 @@ function makeOrderSwitch() {
   return wrap;
 }
 
+/* ---------------------------------------------------------------------
+ * Output Mix channel switch - L / R / L+R routing into the Force's real
+ * 2-channel capture tap (forceAudioInject.h: there is no 3rd channel to
+ * route to, a voice lands on L, R, or both). Sends the label itself as the
+ * wire value ("L"/"R"/"L+R") - maze_host's mix.channel handler expects
+ * exactly these three strings, not a numeric index, unlike Order above.
+ * ------------------------------------------------------------------- */
+const MIX_CHAN_OPTIONS = ["L", "R", "L+R"];
+function makeMixChanSwitch() {
+  const wrap = document.createElement("div"); wrap.className = "order-wrap";
+  const stage = document.createElement("div"); stage.className = "stage";
+  const track = document.createElement("div"); track.className = "order-track";
+  stage.appendChild(track);
+  const topline = document.createElement("div"); topline.className = "topline";
+  const val = document.createElement("div"); val.className = "kval";
+  const segs = MIX_CHAN_OPTIONS.map((label, i) => {
+    const seg = document.createElement("div"); seg.className = "order-seg mix-chan-seg"; seg.title = label; seg.textContent = label;
+    seg.addEventListener("click", () => commit(i));
+    track.appendChild(seg);
+    return seg;
+  });
+  const cap = document.createElement("div"); cap.className = "cap-label"; cap.textContent = "Channel";
+
+  let idx = 2; /* default L+R, matching maze_host's shm_setup() default */
+  function render(i) { idx = i; segs.forEach((s, j) => s.classList.toggle("active", j === i)); val.textContent = MIX_CHAN_OPTIONS[i]; }
+  function commit(i) { render(i); schwungRemote.setParam("mix.channel", MIX_CHAN_OPTIONS[i]); }
+  render(idx);
+
+  registry["mix.channel"] = { set: (v) => { const i = MIX_CHAN_OPTIONS.indexOf(String(v).trim()); if (i >= 0) render(i); } };
+
+  wrap.appendChild(stage); wrap.appendChild(topline); wrap.appendChild(val); wrap.appendChild(cap);
+  return wrap;
+}
+
 function makeToggle(item) {
   const wrap = document.createElement("div"); wrap.className = "rnd-block";
   const t = document.createElement("div"); t.className = "toggle";
@@ -482,6 +518,21 @@ outHalf.appendChild(outTitle); outHalf.appendChild(outRow);
 outSection.appendChild(envHalf);
 outSection.appendChild(outHalf);
 panelRows.appendChild(outSection);
+
+/* ---- Output Mix: host-level controls (forceAudioIn.so's per-voice mix -
+ * see forceAudioInject.h), distinct from the DSP's own "Output" half above
+ * (sat/level are maze_voice.c chain_params; these three are NOT - they're
+ * intercepted by maze_host's "mix.*" control-socket keys before ever
+ * reaching the DSP). Lets this voice be switched on/off, leveled, and
+ * routed to L / R / L+R independently when multiple voices are mixed into
+ * the Force's Audio-In at once. ---- */
+panelRows.appendChild(buildSection("Output Mix", null, (stack) => {
+  const r = row();
+  r.appendChild(col([ makeToggle({ key: "mix.enabled", cap: "Voice Out", def: true }) ]));
+  r.appendChild(col([ makeMixChanSwitch() ]));
+  r.appendChild(col([ makeKnob({ size: "big", key: "mix.gain", cap: "Voice Vol", unit: "%", min: 0, max: 150, def: 100 }) ]));
+  stack.appendChild(r);
+}));
 
 /* ---- Randomise strip ---- */
 const rndStrip = document.getElementById("rndStrip");

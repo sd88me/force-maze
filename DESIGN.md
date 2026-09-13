@@ -385,12 +385,210 @@ its `maze_host` a distinct `--mix-slot`, but its `run_*.sh` must skip the
 `forceAudioIn` entry race exactly like the mockbaMagic/MidiLoop
 boot-time-LD_PRELOAD bug documented above.
 
-**Not yet done:** cross-built/hardware-tested (this change is source-only so
-far - `addon/forceAudioIn.so`, `addon/maze_host`, `addon/injectTone` all need
-rebuilding via `scripts/build.sh` / `scripts/build_audiotap.sh` before this
-is real on a device); no second voice addon actually created yet (would need
-its own module.json/NSMODULE.json/ports, per the mockbamod-module-creator
-skill's port-collision guidance, e.g. web panel 8305 following 8303/8304).
+**Update 2026-09-13: cross-built and hardware-verified.** `mix.gain`/
+`mix.channel`/`mix.enabled` round-tripped correctly through the real control
+socket into `forceAudioIn.so`'s own diagnostic log on the real audio thread,
+one voice at a time (slot 0 only tested live so far - no second voice addon
+created yet; would need its own module.json/NSMODULE.json/ports, per the
+mockbamod-module-creator skill's port-collision guidance, e.g. web panel 8305
+following 8303/8304).
+
+## Open incident: pads/buttons dead with forceAudioIn.so armed (2026-09-13)
+
+Found while re-enabling the engine for the hardware test above: two live
+`acvs` restarts with `/dev/shm/.LD_PRELOAD` content confirmed correct both
+times (all three libs present - `cat`'d directly) still killed pads/buttons.
+This is **not** the boot-time file race fixed elsewhere in this doc - that
+race is about the file's *content* being wrong; here the content was right
+and it still happened. Root cause not yet found. Ruled out so far (static
+analysis, no device access needed):
+
+- **Not a symbol collision with MidiLoop's `tkgl_anyctrl_lt.so`.**
+  `forceAudioIn.so` interposes only `snd_pcm_readi`/`snd_pcm_readn`/
+  `snd_pcm_hw_params` (PCM streaming). `tkgl_anyctrl_lt.so` interposes
+  `snd_rawmidi_open`/`snd_rawmidi_read`/`snd_seq_create_simple_port`/
+  `snd_midi_event_decode`/`aconnect` (sequencer/rawmidi) plus a
+  `midiPortBlacklist.txt`-driven filter - confirmed directly from both
+  `.so`'s dynamic symbol tables. Zero overlap. (This also means the
+  mockbamod-module-creator skill's gotchas.md tier list was wrong to group
+  `tkgl_anyctrl_lt.so` with `mockbaMagic`'s raw patching - it's the same
+  interposition tier as `forceAudioIn.so` itself, just a disjoint symbol
+  set. Corrected there.)
+- **Probably not mockbaMagic's raw address-patching either.** Confirmed
+  `mockbaMagic.din` genuinely is a firmware-version-keyed patch table
+  (raw bytes show `FORCE` + version strings + address/offset/bytes records),
+  but the script that actually invokes the ptrace-based patcher
+  (`livePatcher.sh`) is commented out in this device's `run_mockbaMagic.sh`
+  - the raw-patch mechanism looks dormant on this device right now, so an
+  address-shift-from-a-third-library theory probably doesn't apply here.
+
+**Live-tested elimination sequence, in order, each a real acvs-restart cycle
+on the actual device:**
+
+1. Diagnostics thread's mere existence - gated it off by default behind a
+   marker file (`AI_DIAG_MARKER` = `/tmp/forceAudioIn.diag` in
+   `forceAudioIn.c`; `touch` it before an `acvs` restart to re-enable for
+   debugging). **Ruled out**: failed again with the thread confirmed not
+   spawning (log showed "diagnostics thread disabled by default" on every
+   load).
+2. `forceAudioIn.so` merely being loaded, zero voices attached (`maze_host`
+   never started). **Ruled out**: survived 3x rapid restarts cleanly.
+3. The per-sample write loop in `mix_in_one` specifically - tested by
+   attaching a voice but muting it (`mix.enabled = 0`) before the restarts,
+   which still runs every other line of `mix_in_one` (the atomic head/tail
+   loads, the backlog/trim math, the atomic tail store) but skips the
+   `chan_allowed`/`sample_to_float`/`float_to_sample` inner loop entirely.
+   **Ruled out**: failed again, same restart-2/3 pattern.
+
+**Current standing**: the bug needs a voice actually attached (a real
+`/forceAudioInjectN` ring existing), but does NOT need it to be actively
+mixing samples into the output. That leaves two remaining, not yet
+distinguished candidates: (a) the ring bookkeeping/atomics/backlog-trim path
+in `mix_in_one` that runs on every ALSA read regardless of `enabled`, or
+(b) something about the separate voice-host PROCESS itself (`maze_host`'s
+RtMidi ALSA-sequencer client, its timer thread, its control socket thread -
+none of which run inside MPC, but see below on a genuine correctness bug
+in how the ring behaves across a multi-second consumer gap, found while
+re-reading this code, not yet confirmed as related).
+
+**A related but unconfirmed real bug**: `avail = (head - tail) & (AI_RING_FRAMES
+- 1)` silently aliases if the true unconsumed gap ever exceeds
+`AI_RING_FRAMES` (65536 frames, ~1.49s @ 44100Hz) - plausible for a full MPC
+relaunch. `maze_host` never stops rendering across an `acvs` restart, so the
+gap where literally no consumer exists could exceed one full ring lap. This
+would cause audio-quality artifacts (stale/wrapped data being mixed in), not
+an input-handling symptom like dead pads, so it's flagged as real and worth
+fixing on its own merits but not currently believed to explain this
+incident. Parked per user instruction until the incident itself is
+resolved.
+
+**Lazy re-attach, added 2026-09-13 for a different reason (see below), with
+a side effect worth flagging for this investigation**: `forceAudioIn.so`
+used to attach to each voice slot ONLY once, in the constructor - if
+`maze_host` started after MPC (no intervening `acvs` restart), it was never
+noticed. Fixed (`ai_try_attach`, called from both the constructor and a
+background thread's ~2s wake loop) so a voice started post-boot gets picked
+up live. **This makes the background thread unconditional again** - it no
+longer only exists when `AI_DIAG_MARKER` is set or a voice happens to be
+present at load time; it always runs now, because lazy re-attach needs it
+to. The marker file still gates the diagnostics-LOGGING half of the thread's
+job, not its existence. Net effect on the open incident above: item 1 in the
+elimination list (thread's mere existence, tested with a voice already
+attached at load) is not perfectly re-tested by this - worth re-confirming
+that a bare "library loaded, background thread running, zero voices ever
+attached" survives repeated restarts under this new always-on-thread
+version, since that specific combination (thread present, but for a
+different reason and always-on rather than gated) hasn't been tested in
+exactly this shape. (Live-tested afterward: it doesn't - a bare loaded
+library with the always-on thread and zero voices ever attaching survived
+3x restarts cleanly, same as before.)
+
+**Address-shift theory: measured, then ruled out by disassembly.** A voice-
+attached restart's `/proc/<MPC-pid>/maps`, diffed against a zero-voice
+baseline, showed `mockbaMagic.so`'s own load base shift by exactly 0x40000
+(256KB) - mechanically expected (our extra mappings load earlier in the
+sequence, pushing everything after them down), and the first genuinely new,
+measurable structural fact distinguishing a failing run from a passing one.
+Disassembled both `mockbaMagic.so`'s and `tkgl_anyctrl_lt.so`'s actual
+`.init_array` entries (ARM/Thumb-2, via the QEMU-emulated armhf Docker
+image's own `objdump` - a native reader, not guesswork) to check whether
+either does anything address-dependent at load time that a base shift could
+break. Both are provably inert: `mockbaMagic.so`'s three constructors are
+`frame_dummy` (generic EH-frame registration) plus two `std::ios_base::Init`
+calls (automatic iostream setup) - nothing touches `mockbaMagic.din` or does
+address arithmetic; that happens in a *different*, uncalled-at-load-time
+function, almost certainly only reached from the separate standalone
+`mockbaMagic <pid>` executable's own `main()` (spawned by the currently-
+disabled `livePatcher.sh`), not from anything that runs inside MPC right
+now. `tkgl_anyctrl_lt.so`'s one constructor is also just `frame_dummy`; its
+real logic (`match`/`GetSeqClientFromPortName`) is ordinary functions called
+on demand, not at load. **Ruled out**: neither suspect library's own
+startup code can be broken by where it lands in memory.
+
+## Breakthrough: this is a race, not a fixed bug (2026-09-13)
+
+A test running `systemctl restart acvs &` in the *background*, with a
+concurrent `ps`-polling loop in the same shell (incidental - it was there to
+catch the new MPC pid for an `strace` attach attempt that itself failed at
+the tooling level and never actually traced anything) - the first "voice
+already attached" restart that did NOT kill pads/wifi, after that exact
+repro shape had failed with zero exceptions across every prior test (the
+maps-diff test, the idle-voice test, the original repro, the muted test).
+The one difference: extra CPU/scheduling activity during MPC's startup that
+no prior test had. n=1, so not conclusive on its own, but a real,
+previously-100%-reproducible failure flipping to a pass on a pure timing
+perturbation is strong evidence this is a race condition, not a fixed
+logical or address bug - consistent with the address-shift finding above
+(real, measurable, but inert on its own) and with this project's own
+SCHED_FIFO incident (a different mechanism, but the same theme: this
+addon's own early activity interacting badly with something else's startup
+timing, not a straightforward code defect).
+
+**Controlled follow-up experiment, not yet live-tested**: rather than ask
+for the same accident to be repeated (uncontrolled - unclear if it was the
+CPU load, process creation, `/proc` access, or something else about that
+shell pipeline), added a deliberate, opt-in, marker-gated delay at the very
+start of `ai_ctor`, before any attach work happens (`ai_maybe_delay()` in
+`forceAudioIn.c`, gated behind `/tmp/forceAudioIn.delay` - present but
+empty defaults to 250ms, or reads a millisecond count from the file's
+content; absent = no delay, unchanged default behavior). If a plain delay
+alone reproduces the fix across *multiple* restarts (not the n=1 the
+accident gave), that's clean, controlled confirmation of a race resolved by
+not running this constructor's work "too fast" relative to something else's
+own startup - and a far better workaround than keeping a polling loop
+running forever. If it doesn't help, that rules out simple "we're just too
+fast" and points back toward something more specific about what the
+accidental CPU/scheduling perturbation actually did.
+
+## Shipped baseline: zero-voices-at-boot + on-demand start (2026-09-13)
+
+The controlled delay experiment above was run live: 300ms, 2 restarts with
+a voice attached before each - 1 pass, 1 fail. Not enough to confirm or
+rule out the race theory on its own (a genuinely racy ~50/50 mechanism
+looks exactly like this by chance), but enough to rule out "300ms alone is
+a reliable fix." Root cause is still unknown as of this writing.
+
+Rather than block a usable setup on finding that root cause, shipped the
+workaround this section's own earlier design was already built for:
+
+- `addon/run_maze_host.sh` now **only arms `forceAudioIn.so`** at boot,
+  with zero voices ever attached at that point - proven safe across every
+  repeated-restart test run against it, including a real physical reboot.
+  It no longer starts `maze_host` itself.
+- `maze_host` is started **only** on demand, via the nodeServer Modules
+  page's own start/stop toggle (`NSMODULE.json`'s `PROCESSNAME`/
+  `FILENAME`/`ARGUMENTS`) - this spawns the process directly, with no
+  `LD_PRELOAD`/`acvs` involvement at all, so it never re-triggers the race.
+  `forceAudioIn.so`'s lazy re-attach (its always-on background thread)
+  picks the new ring up within ~2s, no restart needed.
+- The nodeServer "Autoload" checkbox on that page is a live
+  `fs.existsSync` check against the same top-level script `manage.sh
+  ENABLE` creates (confirmed by reading `moduler/index.js` directly) - not
+  a separate mechanism, and self-healing if that file ever goes missing
+  (recopies the same arm-only script).
+- **The hard rule this depends on**: once a voice has been started this
+  way, do not restart `acvs` again until it's been stopped first (same
+  toggle). Every live test of "`acvs` restart while a voice is attached"
+  has failed, with the single accidental exception above - there is no
+  known-safe way to do it on purpose yet.
+
+Verified end-to-end on real hardware the same day: enabled persistently,
+survived a real physical reboot (zero voices, pads/wifi fine), started via
+the nodeServer toggle (lazy-attach confirmed via `/proc/<MPC-pid>/maps`,
+no restart, pads/wifi fine, audio audibly playing), stopped via the same
+toggle (clean `killall`, no restart, pads/wifi fine). This is the current
+shipped baseline - continuing to chase the actual root cause (the delay
+experiment's ambiguous result, and whether a longer delay or a genuine
+concurrent workload reproduces the accidental fix) is separate, ongoing
+work, not a blocker for normal use under the hard rule above.
+
+One unrelated thing surfaced during this testing, worth remembering: a
+`run_<name>.sh` placed directly at the top level of `AddOns/` (as
+`manage.sh ENABLE` does) can be wiped by an SD-card-level recovery action
+(replacing MockbaMod's boot files / running its `emmc-repair` tool) even
+though the addon's own subfolder is untouched - re-running `manage.sh
+ENABLE` is enough to restore it, no data is actually lost, but it's worth
+checking for after any such recovery.
 
 ## Not yet built
 

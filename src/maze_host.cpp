@@ -69,6 +69,7 @@ static std::atomic<uint64_t> g_ring_drops{0};
 static std::string g_chain_params_json;
 static std::string g_ctrl_sock_path = "/tmp/maze_ctrl.sock";
 static bool         g_verbose = false;
+static unsigned     g_mix_slot = 0;   /* which /forceAudioInjectN this instance owns */
 
 /* ---------------------------------------------------------------------------
  * CC -> set_param, for a Force Q-Link-mapped MIDI track ("headless" control -
@@ -136,9 +137,12 @@ static void apply_cc(int idx, int value /* 0..127 */) {
  * Shared-memory ring setup (producer side -- mirrors injectTone.c, but with
  * a real DSP engine behind it instead of a fixed tone).
  * ------------------------------------------------------------------------- */
+static char g_shm_name[24];
+
 static bool shm_setup() {
-    shm_unlink(AI_SHM_NAME);  /* we are the sole producer -- start clean */
-    int fd = shm_open(AI_SHM_NAME, O_CREAT | O_RDWR, 0666);
+    ai_shm_name(g_mix_slot, g_shm_name, sizeof(g_shm_name));
+    shm_unlink(g_shm_name);  /* we are the sole producer for this slot -- start clean */
+    int fd = shm_open(g_shm_name, O_CREAT | O_RDWR, 0666);
     if (fd < 0) { perror("shm_open"); return false; }
     if (ftruncate(fd, AI_SHM_BYTES) != 0) { perror("ftruncate"); close(fd); return false; }
     void *m = mmap(nullptr, AI_SHM_BYTES, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -149,6 +153,9 @@ static bool shm_setup() {
     memset(g_shm, 0, AI_SHM_BYTES);
     g_shm->rate = (uint32_t)MOVE_SAMPLE_RATE;
     g_shm->channels = 2;   /* maze_voice's render_block is stereo interleaved */
+    g_shm->enabled = 1;
+    g_shm->gain = 1.0f;
+    g_shm->channel_mask = AI_CHAN_LR;
     __atomic_store_n(&g_shm->magic, AI_MAGIC, __ATOMIC_RELEASE);
     return true;
 }
@@ -324,7 +331,46 @@ static void timer_loop() {
  *   GET <key>\n           -> "<value>\n" or "ERR\n"
  *   DESCRIBE\n            -> the module's chain_params JSON, one line
  *   NOTE <note> <vel>\n   -> trigger a note (web UI "audition" button)
+ *
+ * "mix.*" keys are host-level output-mix controls (voice on/off, volume,
+ * L/R/L+R routing) that live in the shared-memory struct forceAudioIn.so
+ * reads directly - see forceAudioInject.h. They are intercepted here rather
+ * than forwarded to g_api->set_param/get_param, which only knows maze_voice
+ * .c's own chain_params (module.json) and would just error on an unknown
+ * key. There is deliberately no separate "mixer" service: each voice's own
+ * control socket / web panel owns its own mix state.
  * ------------------------------------------------------------------------- */
+static bool handle_mix_set(const std::string &key, const std::string &val) {
+    if (key == "mix.enabled") {
+        g_shm->enabled = (val == "1" || val == "true") ? 1u : 0u;
+        return true;
+    }
+    if (key == "mix.gain") {
+        /* wire value is percent (0..~150, matching every other level knob in
+         * this UI) - forceAudioIn.so wants a plain linear multiplier. */
+        g_shm->gain = std::strtof(val.c_str(), nullptr) / 100.0f;
+        return true;
+    }
+    if (key == "mix.channel") {
+        g_shm->channel_mask = (val == "L") ? AI_CHAN_L : (val == "R") ? AI_CHAN_R : AI_CHAN_LR;
+        return true;
+    }
+    return false;
+}
+static bool handle_mix_get(const std::string &key, std::string &out) {
+    if (key == "mix.enabled") { out = g_shm->enabled ? "1" : "0"; return true; }
+    if (key == "mix.gain") {
+        char b[32]; std::snprintf(b, sizeof(b), "%.1f", g_shm->gain * 100.0f);
+        out = b; return true;
+    }
+    if (key == "mix.channel") {
+        uint32_t m = g_shm->channel_mask;
+        out = (m == AI_CHAN_L) ? "L" : (m == AI_CHAN_R) ? "R" : "L+R";
+        return true;
+    }
+    return false;
+}
+
 static void handle_ctrl_line(int fd, const std::string &line) {
     char cmd[16] = {0}, key[64] = {0}, val[256] = {0};
     if (sscanf(line.c_str(), "%15s", cmd) != 1) { send(fd, "ERR\n", 4, 0); return; }
@@ -335,12 +381,19 @@ static void handle_ctrl_line(int fd, const std::string &line) {
         return;
     }
     if (!strcmp(cmd, "SET") && sscanf(line.c_str(), "%*s %63s %255[^\n]", key, val) == 2) {
+        if (handle_mix_set(key, val)) { send(fd, "OK\n", 3, 0); return; }
         std::lock_guard<std::mutex> lk(g_lock);
         g_api->set_param(g_inst, key, val);
         send(fd, "OK\n", 3, 0);
         return;
     }
     if (!strcmp(cmd, "GET") && sscanf(line.c_str(), "%*s %63s", key) == 1) {
+        std::string mix_val;
+        if (handle_mix_get(key, mix_val)) {
+            std::string reply = mix_val + "\n";
+            send(fd, reply.c_str(), reply.size(), 0);
+            return;
+        }
         char buf[256];
         int n;
         { std::lock_guard<std::mutex> lk(g_lock);
@@ -411,8 +464,10 @@ static void usage(const char *me) {
         "  --client NAME         ALSA client name       (default: Mockba Maze)\n"
         "  --module-dir PATH     dir containing module.json (default: .)\n"
         "  --ctrl-sock PATH      control socket path     (default: /tmp/maze_ctrl.sock)\n"
-        "  --control-channel N   1-16, CC-in for the Q-Link track (default: 1)\n",
-        me);
+        "  --control-channel N   1-16, CC-in for the Q-Link track (default: 1)\n"
+        "  --mix-slot N          voice slot 0..%d for forceAudioIn.so (default: 0) -\n"
+        "                        each simultaneous voice needs a distinct slot\n",
+        me, AI_MAX_VOICES - 1);
 }
 
 int main(int argc, char **argv) {
@@ -426,6 +481,11 @@ int main(int argc, char **argv) {
         else if (a == "--module-dir" && i+1 < argc) module_dir = argv[++i];
         else if (a == "--ctrl-sock"  && i+1 < argc) g_ctrl_sock_path = argv[++i];
         else if (a == "--control-channel" && i+1 < argc) g_ctrl_ch = (std::atoi(argv[++i]) - 1) & 0x0F;
+        else if (a == "--mix-slot" && i+1 < argc) {
+            int s = std::atoi(argv[++i]);
+            if (s < 0 || s >= AI_MAX_VOICES) { usage(argv[0]); return 2; }
+            g_mix_slot = (unsigned)s;
+        }
         else { usage(argv[0]); return (a == "-h" || a == "--help") ? 0 : 2; }
     }
 
@@ -470,7 +530,7 @@ int main(int argc, char **argv) {
         "[maze] up. port '%s:In'  ctrl socket %s  shm %s  ctrl ch %d\n"
         "[maze] route a MIDI track to '%s:In' for notes and CC (Q-Link); audio\n"
         "[maze] is mixed into the Force's capture input via ForceAudioIn (must be enabled).\n",
-        client.c_str(), g_ctrl_sock_path.c_str(), AI_SHM_NAME, g_ctrl_ch + 1, client.c_str());
+        client.c_str(), g_ctrl_sock_path.c_str(), g_shm_name, g_ctrl_ch + 1, client.c_str());
 
     std::thread timer(timer_loop);
     std::thread ctrl(ctrl_server_loop, lfd);
@@ -485,7 +545,7 @@ int main(int argc, char **argv) {
         g_api->destroy_instance(g_inst);
     }
     delete in;
-    if (g_shm) { munmap(g_shm, AI_SHM_BYTES); shm_unlink(AI_SHM_NAME); }
+    if (g_shm) { munmap(g_shm, AI_SHM_BYTES); shm_unlink(g_shm_name); }
     fprintf(stderr, "[maze] bye\n");
     return 0;
 }
