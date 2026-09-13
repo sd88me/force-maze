@@ -88,12 +88,15 @@ Or skip the hardware knobs entirely and use the web panel at
 
 ## Status
 
-Native logic smoke test passes (`tests/run.sh`): sequencing, note on/off
-balance, independent per-sequencer output channel, and the state-persistence
-round-trip (save → reload → same channels/lengths) all verified on the host
-architecture. **Not yet built for armhf** (needs Docker/QEMU, see
-`scripts/build.sh`) or tested on real hardware — see `../DESIGN.md` for the
-toolchain notes shared with the other two modules in this org.
+**Built for armhf and hardware-verified (2026-09-13).** Native logic smoke
+test passes (`tests/run.sh`): sequencing, note on/off balance, independent
+per-sequencer output channel, and the state-persistence round-trip (save →
+reload → same channels/lengths) all verified on the host architecture.
+Deployed to a live Force: both addons enable cleanly, `maze_seq_host`'s
+virtual ALSA ports register, and the web panel's SET/GET round-trips
+against the real running engine (confirmed live: `s2_channel`, `s1_length`).
+Not yet confirmed on hardware: a real MIDI clock track driving playback, and
+the `.xtk` template on a real touchscreen — see `DESIGN.md`'s TODO list.
 
 ## License
 

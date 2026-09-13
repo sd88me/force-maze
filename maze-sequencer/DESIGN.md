@@ -1,8 +1,16 @@
 # Force Maze Sequencer — porting `schwung-maze`'s Maze to the Akai Force
 
-Status: **native logic smoke test passing, armhf build and hardware
-untested.** Follows the same host-shim porting pattern as `force-acid`
-(MIDI-FX) and `../maze-voice` (audio DSP), documented once at
+Status: **built for armhf and hardware-verified (2026-09-13).** Deployed to
+a live MockbaMod Force: `maze_seq_host` registers its virtual ALSA ports
+(`Mockba Maze Seq In`/`Out`), the web panel serves and round-trips real
+control changes (confirmed `s2_channel`/`s1_length` set via the browser API
+and read back from the live engine). Not yet confirmed: an actual MIDI
+clock driving the sequencer end-to-end on hardware (tested so far via the
+native smoke test's synthetic clock, and via real param SET/GET on-device —
+not yet with a real Force transport track wired to `Mockba Maze Seq In`),
+and the `.xtk` template on a real touchscreen. Follows the same host-shim
+porting pattern as `force-acid` (MIDI-FX) and `../maze-voice` (audio DSP),
+documented once at
 `~/.claude/skills/mockbamod-module-creator/references/porting-schwung-modules.md`
 if that skill is installed.
 
@@ -172,12 +180,25 @@ backend) + system ALSA (`libasound.so.2`).
 
 ## TODO before calling it v1
 
-- [ ] real armhf cross build (`scripts/build.sh` needs Docker, unavailable
-      in the environment this port was written in — same limitation
-      `force-acid`'s own `DESIGN.md` recorded initially)
-- [ ] hardware smoke test: virtual ports register, Force clock drives
-      stepping, notes land on the right channel per sequencer, web panel
-      talks to a real `maze_seq_host`
+- [x] real armhf cross build (`scripts/build.sh`, `arm32v7/debian:stretch`
+      under QEMU) — `GLIBC_2.4` required, comfortably under the device's
+      ceiling
+- [x] deployed to a live Force: `manage.sh ENABLE` + `web/manage.sh ENABLE`
+      both succeed, `maze_seq_host` + `server.py` both running, virtual
+      ports registered (`aconnect -l` shows `Mockba Maze Seq` client with
+      `In`/`Out`), web panel reachable and a real SET/GET round-trip
+      (`s2_channel`, `s1_length`) confirmed against the live engine
+- [x] fixed a deploy-time bug found live: `addon/run_maze_seq.sh` only
+      redirected the binary's stderr, not stdout — a backgrounded process
+      with stdout still attached to the SSH session's pipe holds the whole
+      `ssh manage.sh ENABLE` command open forever (the remote side had
+      actually started fine; only the SSH client was stuck waiting for
+      that fd to close). Both stdout and stderr now redirect to
+      `/tmp/maze_seq_host.log`.
+- [ ] a real MIDI clock (Force transport track → `Mockba Maze Seq In`)
+      driving playback end-to-end on hardware — verified so far via the
+      native smoke test's synthetic clock and via direct param SET/GET,
+      not yet with real transport
 - [ ] visually confirm `addon/Force Maze Seq Control.xtk` on a real screen
       (see `docs/capture-xtk.md`)
 - [ ] parameter feedback (CC out, mirroring `force-acid`'s v0.2 channel-16

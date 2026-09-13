@@ -16,5 +16,5 @@ else
         --module-dir "$APPDIR" \
         --ctrl-sock /tmp/maze_seq_ctrl.sock \
         --control-channel 1 \
-        2>/dev/null &
+        >/tmp/maze_seq_host.log 2>&1 &
 fi

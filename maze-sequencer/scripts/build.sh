@@ -20,7 +20,7 @@ echo "== compile + package (native armhf under QEMU — slow, be patient) =="
 docker run --rm --platform "$PLATFORM" \
   -u "$(id -u):$(id -g)" -v "$PWD":/build -w /build "$IMG" bash -euxc '
   COMMON="-O2 -Wall -Wextra -Wno-unused-parameter -D_DEFAULT_SOURCE -Isrc"
-  rm -rf obj
+  rm -rf obj && mkdir -p obj
 
   # sequencer core — C, upstream logic untouched but for the FORCE-ONLY
   # header swap + state-path change (see src/maze_seq_core.c header)
