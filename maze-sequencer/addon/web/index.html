@@ -79,16 +79,7 @@
   .knob-wrap.big .knob-svg { width: 52px; height: 52px; }
   .knob-svg { cursor: ns-resize; touch-action: none; overflow: visible; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.6)); }
 
-  /* ---- stepper: cycling enum readout ---- */
-  .stepper-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-  .stepper-wrap .stage { height: 56px; }
-  .step-box { width: 62px; height: 26px; border-radius: 4px; cursor: pointer; background: #050403;
-    box-shadow: inset 0 1px 4px rgba(0,0,0,0.7), 0 0 0 1px var(--plate-line);
-    display: flex; align-items: center; justify-content: center; padding: 0 4px; }
-  .step-box .txt { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; color: var(--led-on);
-    text-shadow: 0 0 5px rgba(226,121,63,0.45); text-align: center; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-  /* ---- dropdown: native <select> for the Global section's enums ---- */
+  /* ---- dropdown: native <select> for every enum control ---- */
   .dropdown-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
   .dropdown-wrap .stage { height: 56px; }
   .dd-select { width: 76px; height: 26px; border-radius: 4px; cursor: pointer; background: #050403; color: var(--led-on);
@@ -157,7 +148,7 @@
  * Transport: talks to web/server.py, which bridges to host_shim's Unix
  * control socket (SET/GET). This replaces Move's schwungRemote/postMessage
  * API (the manager iframe host doesn't exist standalone on the Force) but
- * keeps its exact call shape, so every knob/stepper/bits-strip/button below
+ * keeps its exact call shape, so every knob/dropdown/bits-strip/button below
  * - unchanged from schwung-maze's own web_ui.html - just works.
  *
  * Move namespaces overtake-tool params under "overtake_dsp:"; there's only
@@ -285,35 +276,12 @@ function makeKnob(item) {
 }
 
 /* ---------------------------------------------------------------------
- * Stepper — cycling enum readout. Wire value is the numeric option index.
- * ------------------------------------------------------------------- */
-function makeStepper(item) {
-  const wrap = document.createElement("div"); wrap.className = "stepper-wrap";
-  const stage = document.createElement("div"); stage.className = "stage";
-  const box = document.createElement("div"); box.className = "step-box";
-  const txt = document.createElement("div"); txt.className = "txt";
-  box.appendChild(txt); stage.appendChild(box);
-  const cap = document.createElement("div"); cap.className = "cap-label"; cap.textContent = item.cap;
-
-  let idx = item.def || 0;
-  function render(i) { idx = i; txt.textContent = item.options[idx]; }
-  function commit(i) { render(i); schwungRemote.setParam(P + item.key, String(idx)); }
-  function advance(dir) { commit((idx + dir + item.options.length) % item.options.length); }
-  box.addEventListener("click", (e) => advance(e.shiftKey ? -1 : 1));
-  box.addEventListener("contextmenu", (e) => { e.preventDefault(); advance(-1); });
-  box.addEventListener("wheel", (e) => { advance(-Math.sign(e.deltaY)); e.preventDefault(); }, { passive: false });
-  render(idx);
-
-  wrap.appendChild(stage); wrap.appendChild(cap);
-  registry[item.key] = { set: (v) => { const i = Math.round(parseFloat(v)); if (i >= 0 && i < item.options.length) render(i); } };
-  return wrap;
-}
-
-/* ---------------------------------------------------------------------
- * Dropdown — a native <select>, same registry contract as makeStepper
- * (wire value is the numeric option index), used for the Global section's
- * enums (Scale/Key/Note Rate/Note Len) where click-to-cycle through
- * 6-12 options is more clicks than picking straight from a list.
+ * Dropdown — a native <select> for every enum control (Scale/Key/Note
+ * Rate/Note Len/Reset Both/per-sequencer Channel). Wire value is the
+ * numeric option index. Replaces an earlier click-to-cycle stepper box -
+ * picking straight from a list beats clicking through up to 16 options
+ * one at a time, and this matches force-acid's web panel's own
+ * enum-select style.
  * ------------------------------------------------------------------- */
 function makeDropdown(item) {
   const wrap = document.createElement("div"); wrap.className = "dropdown-wrap";
@@ -471,14 +439,14 @@ panelRows.appendChild(buildSection("Sequencer", (stack) => {
    * Already present in the upstream module (see maze_seq_core.c's header);
    * exposed here exactly like every other knob, plus on the CC map/.xtk
    * template - see docs/CC-MAP.md. */
-  top.appendChild(col([ makeStepper({ key:"s1_channel", cap:"Channel", options:CHANNEL_OPTS, def:0 }) ]));
-  bot.appendChild(col([ makeStepper({ key:"s2_channel", cap:"Channel", options:CHANNEL_OPTS, def:0 }) ]));
+  top.appendChild(col([ makeDropdown({ key:"s1_channel", cap:"Channel", options:CHANNEL_OPTS, def:0 }) ]));
+  bot.appendChild(col([ makeDropdown({ key:"s2_channel", cap:"Channel", options:CHANNEL_OPTS, def:0 }) ]));
 
   top.appendChild(col([ makeAdvancePair("s1") ]));
   bot.appendChild(col([ makeAdvancePair("s2") ]));
 
   mid.appendChild(col([ makeKnob({ size:"big", key:"trig_mix", cap:"Trig Mix", bipolar:true, min:-63, max:64, def:0 }) ]));
-  mid.appendChild(col([ makeStepper({ key:"g_reset", cap:"Reset Both", options:RESET_OPTS, def:4 }) ]));
+  mid.appendChild(col([ makeDropdown({ key:"g_reset", cap:"Reset Both", options:RESET_OPTS, def:4 }) ]));
 
   const seqALabel = document.createElement("div"); seqALabel.className = "row-caption"; seqALabel.textContent = "Sequencer A";
   const seqBLabel = document.createElement("div"); seqBLabel.className = "row-caption"; seqBLabel.textContent = "Sequencer B";
@@ -490,10 +458,7 @@ panelRows.appendChild(buildSection("Sequencer", (stack) => {
   stack.appendChild(bot);
 }));
 
-/* ---- Global: shared across both sequencers, stacked under Sequencer.
- * Dropdowns (not the click-to-cycle stepper) - picking straight from a
- * 6-12 option list beats clicking through them one at a time, and this
- * matches force-acid's web panel's own enum-select style. ---- */
+/* ---- Global: shared across both sequencers, stacked under Sequencer ---- */
 panelRows.appendChild(buildSection("Global", (stack) => {
   const r = row();
   r.appendChild(col([ makeDropdown({ key:"scale", cap:"Scale", options:SCALE_OPTS, def:1 }) ]));
@@ -508,7 +473,7 @@ panelRows.appendChild(buildSection("Global", (stack) => {
  * drove this via onParamChange from its own adaptive server-side poll), so
  * this page polls GET /state itself and fans each field out to whichever
  * registry entry owns that key. One HTTP request updates every knob/
- * stepper/bits-strip/running-indicator at once, rather than one request
+ * dropdown/bits-strip/running-indicator at once, rather than one request
  * per registry key (~20 keys), which is both simpler and far cheaper than
  * porting Move's per-key getParam-in-a-loop seed() verbatim would have
  * been - server.py's /param GET fallback (state-JSON lookup) still exists

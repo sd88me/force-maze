@@ -19,11 +19,11 @@ indicator that replaces a `statusText` stuck forever on "Connecting…".
 are now explicitly captioned, with the shared Trig Mix/Reset Both controls
 in an unlabeled row between them.
 
-**Global dropdowns** — Scale/Key/Note Rate/Note Len are native `<select>`
-elements (like `force-acid`'s web panel's enum controls) instead of the
-click-to-cycle stepper box used elsewhere — picking straight from a
-6-12-option list beats clicking through them one at a time. The per-
-sequencer Channel selectors and Reset Both keep the stepper style.
+**Dropdowns** — every enum control (Scale/Key/Note Rate/Note Len/Reset Both/
+the per-sequencer Channel selectors) is a native `<select>` (like
+`force-acid`'s web panel's enum controls), not the earlier click-to-cycle
+stepper box — picking straight from a list beats clicking through up to 16
+options one at a time.
 
 ## Run it
 
