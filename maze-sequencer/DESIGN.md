@@ -204,6 +204,17 @@ backend) + system ALSA (`libasound.so.2`).
       sequencers' play-heads/step patterns were observed advancing live
       through `GET /state`. This is a real setup gotcha, not a bug - now
       called out explicitly in `README.md`'s deploy steps.
+- [x] nodeServer home-page quick-link — deployed and confirmed live
+      (`http://<force-ip>:8080/mazeseq` → 302 → the web panel). Found a real
+      routing bug along the way: nodeServer's router matches
+      `req.url.startsWith(e.PARAM)`, first match in `ENDPOINTS.js`'s array
+      order wins, so the originally-chosen route name `/forcemazeseq`
+      (mirroring `forceacid`/`forcemaze`'s naming) was silently unreachable
+      - every request for it also starts with the earlier-registered
+      `/forcemaze` (Force Maze Voice), so it always redirected to the wrong
+      port with no error at all. Renamed to `/mazeseq`, which shares no
+      prefix with any existing route. See
+      `nodeserver-integration/README.md`'s "Route-naming gotcha" section.
 - [ ] visually confirm `addon/Force Maze Seq Control.xtk` on a real screen
       (see `docs/capture-xtk.md`)
 - [ ] parameter feedback (CC out, mirroring `force-acid`'s v0.2 channel-16
