@@ -27,11 +27,19 @@
   .topbar .status { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; color: var(--ink-faint); display: flex; align-items: center; gap: 6px; }
   .topbar .status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--led-off); }
   .topbar .status.live .dot { background: var(--led-on); box-shadow: 0 0 5px var(--led-on); }
-  .panic-btn, .sync-btn { font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 4px; padding: 5px 10px; cursor: pointer; border: 1px solid var(--plate-line); }
+  .panic-btn, .sync-btn, .engine-btn { font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 4px; padding: 5px 10px; cursor: pointer; border: 1px solid var(--plate-line); }
   .sync-btn { color: var(--ink-dim); background: #1c1a17; }
   .sync-btn:active { background: #26231e; }
   .panic-btn { color: #fdf3ea; background: linear-gradient(180deg, var(--accent), #7f2f1e); border-color: transparent; margin-left: auto; }
   .panic-btn:active { transform: translateY(1px); }
+
+  /* ---- engine on/off (Start/Stop the maze_seq_host process itself) ---- */
+  .engine-status { display: flex; align-items: center; gap: 6px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; color: var(--ink-faint); }
+  .engine-led { width: 7px; height: 7px; border-radius: 50%; background: var(--led-off); }
+  .engine-led.on { background: #5fd16a; box-shadow: 0 0 5px #5fd16a; }
+  .engine-btn { color: var(--ink-dim); background: #1c1a17; min-width: 52px; }
+  .engine-btn.start { color: #fdf3ea; background: linear-gradient(180deg, #3c8f47, #235a2a); border-color: transparent; }
+  .engine-btn:active { transform: translateY(1px); }
 
   /* ------------------------------------------------------------------ */
   /* Rack                                                                 */
@@ -80,6 +88,20 @@
   .step-box .txt { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; color: var(--led-on);
     text-shadow: 0 0 5px rgba(226,121,63,0.45); text-align: center; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+  /* ---- dropdown: native <select> for the Global section's enums ---- */
+  .dropdown-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .dropdown-wrap .stage { height: 56px; }
+  .dd-select { width: 76px; height: 26px; border-radius: 4px; cursor: pointer; background: #050403; color: var(--led-on);
+    border: 1px solid var(--plate-line); box-shadow: inset 0 1px 4px rgba(0,0,0,0.7);
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; text-align: center; text-align-last: center;
+    -webkit-appearance: none; appearance: none; padding: 0 4px; }
+  .dd-select:focus { outline: 1px solid var(--accent); }
+  .dd-select option { background: #1c1a17; color: var(--ink); }
+
+  /* ---- row caption: labels a row within a section (e.g. "Sequencer A") ---- */
+  .row-caption { font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink-dim); margin-bottom: -2px; }
+
   /* ---- bits strip: 8-step pattern, click to flip that step, lit playhead ---- */
   .bits-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
   .bits-strip { display: flex; gap: 3px; }
@@ -107,6 +129,8 @@
 
 <div class="topbar">
   <span class="name">MAZE SEQ</span>
+  <span class="engine-status"><span class="engine-led" id="engineLed"></span><span id="engineText">Engine&hellip;</span></span>
+  <button class="engine-btn" id="engineBtn" title="Start/stop the maze_seq_host engine process">START</button>
   <span class="status" id="status"><span class="dot"></span><span id="statusText">Connecting&hellip;</span></span>
   <button class="sync-btn" id="sync" title="Force a full re-sync from the device">&#8635; Sync</button>
   <button class="panic-btn" id="panic" title="All notes off">Panic</button>
@@ -286,6 +310,32 @@ function makeStepper(item) {
 }
 
 /* ---------------------------------------------------------------------
+ * Dropdown — a native <select>, same registry contract as makeStepper
+ * (wire value is the numeric option index), used for the Global section's
+ * enums (Scale/Key/Note Rate/Note Len) where click-to-cycle through
+ * 6-12 options is more clicks than picking straight from a list.
+ * ------------------------------------------------------------------- */
+function makeDropdown(item) {
+  const wrap = document.createElement("div"); wrap.className = "dropdown-wrap";
+  const stage = document.createElement("div"); stage.className = "stage";
+  const select = document.createElement("select"); select.className = "dd-select";
+  item.options.forEach((text, idx) => {
+    const opt = document.createElement("option");
+    opt.value = String(idx); opt.textContent = text;
+    select.appendChild(opt);
+  });
+  select.value = String(item.def || 0);
+  stage.appendChild(select);
+  const cap = document.createElement("div"); cap.className = "cap-label"; cap.textContent = item.cap;
+
+  select.addEventListener("change", () => schwungRemote.setParam(P + item.key, select.value));
+
+  wrap.appendChild(stage); wrap.appendChild(cap);
+  registry[item.key] = { set: (v) => { const i = Math.round(parseFloat(v)); if (i >= 0 && i < item.options.length) select.value = String(i); } };
+  return wrap;
+}
+
+/* ---------------------------------------------------------------------
  * Bits strip — the real panel's 8-LED row, genuinely live and clickable:
  * maze_seq_core.c's s{1,2}_flip takes an explicit step index (not "flip
  * whatever's currently playing"), so a click on any LED is a faithful
@@ -430,18 +480,26 @@ panelRows.appendChild(buildSection("Sequencer", (stack) => {
   mid.appendChild(col([ makeKnob({ size:"big", key:"trig_mix", cap:"Trig Mix", bipolar:true, min:-63, max:64, def:0 }) ]));
   mid.appendChild(col([ makeStepper({ key:"g_reset", cap:"Reset Both", options:RESET_OPTS, def:4 }) ]));
 
+  const seqALabel = document.createElement("div"); seqALabel.className = "row-caption"; seqALabel.textContent = "Sequencer A";
+  const seqBLabel = document.createElement("div"); seqBLabel.className = "row-caption"; seqBLabel.textContent = "Sequencer B";
+
+  stack.appendChild(seqALabel);
   stack.appendChild(top);
   stack.appendChild(mid);
+  stack.appendChild(seqBLabel);
   stack.appendChild(bot);
 }));
 
-/* ---- Global: shared across both sequencers, stacked under Sequencer ---- */
+/* ---- Global: shared across both sequencers, stacked under Sequencer.
+ * Dropdowns (not the click-to-cycle stepper) - picking straight from a
+ * 6-12 option list beats clicking through them one at a time, and this
+ * matches force-acid's web panel's own enum-select style. ---- */
 panelRows.appendChild(buildSection("Global", (stack) => {
   const r = row();
-  r.appendChild(col([ makeStepper({ key:"scale", cap:"Scale", options:SCALE_OPTS, def:1 }) ]));
-  r.appendChild(col([ makeStepper({ key:"key", cap:"Key", options:KEY_OPTS, def:0 }) ]));
-  r.appendChild(col([ makeStepper({ key:"note_rate", cap:"Note Rate", options:RATE_OPTS, def:1 }) ]));
-  r.appendChild(col([ makeStepper({ key:"note_length", cap:"Note Len", options:GATE_OPTS, def:3 }) ]));
+  r.appendChild(col([ makeDropdown({ key:"scale", cap:"Scale", options:SCALE_OPTS, def:1 }) ]));
+  r.appendChild(col([ makeDropdown({ key:"key", cap:"Key", options:KEY_OPTS, def:0 }) ]));
+  r.appendChild(col([ makeDropdown({ key:"note_rate", cap:"Note Rate", options:RATE_OPTS, def:1 }) ]));
+  r.appendChild(col([ makeDropdown({ key:"note_length", cap:"Note Len", options:GATE_OPTS, def:3 }) ]));
   stack.appendChild(r);
 }));
 
@@ -479,6 +537,42 @@ document.getElementById("sync").addEventListener("click", () => {
 });
 document.getElementById("panic").addEventListener("click", () => schwungRemote.setParam(P + "panic", "1"));
 
+/* ---------------------------------------------------------------------
+ * Engine on/off — this page (like force-acid's web panel) stays up and
+ * reachable regardless of whether maze_seq_host itself is running, so it
+ * needs its own honest "is the engine actually there" indicator instead
+ * of leaving statusText stuck on "Connecting…" forever when it isn't.
+ * Starts/stops the process itself via server.py's /engine endpoint
+ * (Popen/killall on-device - see server.py's engine_start()/engine_stop()).
+ * ------------------------------------------------------------------- */
+let engineRunning = false;
+function setEngineUI(running) {
+  engineRunning = running;
+  document.getElementById("engineLed").classList.toggle("on", running);
+  document.getElementById("engineText").textContent = running ? "Engine on" : "Engine off";
+  const btn = document.getElementById("engineBtn");
+  btn.textContent = running ? "STOP" : "START";
+  btn.classList.toggle("start", !running);
+  if (!running) document.getElementById("statusText").textContent = "Engine offline";
+}
+function pollEngineStatus() {
+  fetch("/status")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((s) => setEngineUI(!!(s && s.engine_running)))
+    .catch(() => setEngineUI(false));
+}
+document.getElementById("engineBtn").addEventListener("click", () => {
+  const action = engineRunning ? "stop" : "start";
+  fetch("/engine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  }).catch(() => {});
+  setTimeout(pollEngineStatus, 500);
+});
+
+pollEngineStatus();
+setInterval(pollEngineStatus, 2000);
 pollState();
 setInterval(pollState, 200);   /* step/play-head cadence - see file header */
 </script>

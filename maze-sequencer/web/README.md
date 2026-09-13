@@ -8,6 +8,23 @@ strips are genuinely live: they poll `GET /state` every ~200ms so the
 play-head and step pattern track the running sequencer in real time, and
 clicking any step LED flips that step immediately (`s{1,2}_flip`).
 
+**Engine on/off** — the topbar's ENGINE indicator/button (green LED + START/
+STOP) starts and stops `maze_seq_host` itself via `server.py`'s `/engine`
+endpoint (`Popen`/`killall`, same pattern as `force-acid`'s web panel). This
+page is always up regardless of whether the engine is — every control just
+answers 503 until it's running — so this is the "is it actually there"
+indicator that replaces a `statusText` stuck forever on "Connecting…".
+
+**Sequencer A / Sequencer B** — the Sequencer section's top and bottom rows
+are now explicitly captioned, with the shared Trig Mix/Reset Both controls
+in an unlabeled row between them.
+
+**Global dropdowns** — Scale/Key/Note Rate/Note Len are native `<select>`
+elements (like `force-acid`'s web panel's enum controls) instead of the
+click-to-cycle stepper box used elsewhere — picking straight from a
+6-12-option list beats clicking through them one at a time. The per-
+sequencer Channel selectors and Reset Both keep the stepper style.
+
 ## Run it
 
 **Autolaunch (survives reboot), independent of the engine:**

@@ -18,16 +18,27 @@ Deliberately stdlib-only (http.server + socket): no pip install step needed
 on-device, matching this project's other web panels
 (force-acid/web/server.py, ../../maze-voice/web/server.py).
 
+This panel also starts/stops the engine process itself (Popen/killall),
+same as force-acid's web panel and for the same reason: it's always-on
+(its own addon, independent of the engine's), so the page needs a real
+online/offline indicator and a Start/Stop control rather than assuming the
+engine is running. See engine_start()/engine_stop() below.
+
 Run: python3 server.py [--port N] [--ctrl-sock PATH]
 """
 import json
 import socket
+import subprocess
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 WEB_DIR = Path(__file__).resolve().parent
+ADDON_DIR = WEB_DIR.parent          # .../AddOns/ForceMazeSeq on a deployed device
+ENGINE_BIN = ADDON_DIR / "maze_seq_host"
 CTRL_SOCK = "/tmp/maze_seq_ctrl.sock"
 SOCK_TIMEOUT = 1.0
 
@@ -60,6 +71,46 @@ def get_param_via_state(key: str):
     except json.JSONDecodeError:
         return None
     return state.get(key)
+
+
+def engine_present() -> bool:
+    """Is maze_seq_host actually up and answering? The control socket is a
+    direct, sufficient proxy for this - no need to check ALSA MIDI ports
+    the way force-acid's web/server.py does (that one has no control socket
+    at all, only MIDI, so port presence IS its liveness check)."""
+    return ctrl_request("GET running") is not None
+
+
+def engine_start():
+    if engine_present():
+        return True, "already running"
+    if not ENGINE_BIN.exists():
+        return False, f"binary not found: {ENGINE_BIN}"
+    args = [
+        str(ENGINE_BIN),
+        "--module-dir", str(ADDON_DIR),
+        "--ctrl-sock", CTRL_SOCK,
+        "--control-channel", "1",
+    ]
+    try:
+        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 stdin=subprocess.DEVNULL, start_new_session=True)
+    except Exception as e:
+        return False, str(e)
+    # Reap it whenever it exits (killall from /engine stop, a crash, or the
+    # process outliving this server) - otherwise it zombies forever, since
+    # nothing else waits on it. Same pattern as force-acid/web/server.py.
+    threading.Thread(target=proc.wait, daemon=True).start()
+    for _ in range(30):  # up to ~3s for the control socket to come up
+        time.sleep(0.1)
+        if engine_present():
+            return True, "started"
+    return False, "launched but control socket did not respond in time"
+
+
+def engine_stop():
+    subprocess.run(["killall", "maze_seq_host"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True, "stopped"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -131,7 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/status":
-            self._json(200, {"engine_running": ctrl_request("GET running") is not None})
+            self._json(200, {"engine_running": engine_present()})
             return
 
         self.send_error(404, "not found")
@@ -153,6 +204,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             reply = ctrl_request(f"SET {key} {value}")
             self._json(200 if reply == "OK" else 503, {"ok": reply == "OK"})
+            return
+
+        if path == "/engine":
+            action = body.get("action")
+            if action == "start":
+                ok, msg = engine_start()
+            elif action == "stop":
+                ok, msg = engine_stop()
+            else:
+                self._json(400, {"ok": False, "error": "action must be start|stop"})
+                return
+            self._json(200 if ok else 503, {"ok": ok, "message": msg})
             return
 
         self.send_error(404, "not found")
