@@ -63,7 +63,7 @@ read).
 `scripts/build_audiotap.sh`), staged into this repo's own `addon/` and then
 hand-copied into the MockbaMod fork's `SD/AddOns/ForceAudioIn`. They've now
 moved entirely into their own repo,
-[`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn) - that repo owns
+[`force-audioin`](https://github.com/sd88me/force-audioin) - that repo owns
 arming the shared `LD_PRELOAD` tap exclusively (see its own README.md for
 why: one arming addon, many voice addons attaching to it, rather than every
 voice addon bundling its own copy and racing on the same file), and is the
@@ -176,7 +176,7 @@ the ruled-out adaptive-controller experiment above.
 
 *(This section and the three below it are about `forceAudioIn.so` itself,
 which has since moved into its own repo - see
-[`ForceAudioIn/DESIGN.md`](https://github.com/sd88me/ForceAudioIn/blob/main/DESIGN.md)
+[`force-audioin/DESIGN.md`](https://github.com/sd88me/force-audioin/blob/main/DESIGN.md)
 for the canonical, kept-up-to-date version of this history. Left here
 too since this project's own testing is what surfaced most of it.)*
 
@@ -265,7 +265,7 @@ issues), `GLIBC_2.4`/`GLIBCXX_3.4.22` required, comfortably under the
 Force's actual `GLIBCXX_3.4.32` ceiling.
 
 `forceAudioIn.so`/`injectTone` are no longer built from this repo - see the
-separate [`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn) repo's
+separate [`force-audioin`](https://github.com/sd88me/force-audioin) repo's
 own `scripts/build.sh` (still the same `zig cc -target
 arm-linux-gnueabihf.2.39` cross-build, no Docker needed).
 

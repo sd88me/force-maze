@@ -39,7 +39,7 @@ its render output going into a shared-memory ring instead of MIDI out.
 **extract** what MPC plays): this taps `snd_pcm_readi` to **inject** synthesized
 audio into what MPC reads from its capture device. It's a general-purpose
 mechanism, not maze-voice-specific, and lives in its own repo,
-[`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn) (split out of this
+[`force-audioin`](https://github.com/sd88me/force-audioin) (split out of this
 repo on 2026-09-13 — its source used to live here), deployed as its own
 standalone addon in the MockbaMod fork's
 [`SD/AddOns/ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
@@ -100,14 +100,14 @@ nodeserver-integration/  patches for the SEPARATE nodeServer addon (home-page
 
 Writes straight into `addon/`, ready to deploy as-is. `forceAudioIn.so`/
 `injectTone` are no longer built from this repo at all — see the separate
-[`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn) repo's own
+[`force-audioin`](https://github.com/sd88me/force-audioin) repo's own
 `scripts/build.sh`.
 
 ## Deploy / enable
 
 Two independent things need to be on the device, in order:
 
-1. **The shared tap** - the separate [`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn)
+1. **The shared tap** - the separate [`force-audioin`](https://github.com/sd88me/force-audioin)
    addon (already bundled in the MockbaMod fork at
    [`SD/AddOns/ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)),
    enabled once (`manage.sh ENABLE`). This is what actually arms
