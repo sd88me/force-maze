@@ -1,4 +1,11 @@
 /*
+ * VENDORED from https://github.com/sd88me/ForceAudioIn (src/forceAudioInject.h)
+ * - that repo owns the canonical copy since forceAudioIn.c/forceAudioIn.so
+ * define this layout; this copy exists only because maze_host (the producer
+ * below) needs it too. Keep byte-for-byte identical to the canonical copy -
+ * this is the shared-memory ABI contract between the two repos, not
+ * independently-evolvable code.
+ *
  * Shared memory layout between the injector process(es) (e.g. injectTone,
  * maze_host, or any future audio-rendering voice host built the same way)
  * and forceAudioIn.so, the LD_PRELOAD shim that mixes injected audio into

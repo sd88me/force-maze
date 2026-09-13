@@ -58,21 +58,22 @@ on the one capture handle MPC actually reads (confirmed live: `hw:2`, two
 shapes get `hw_params`'d - 4ch and 2ch - only the 2ch one is ever actually
 read).
 
-**Deployment split (2026-09-13):** `forceAudioIn.c`/`forceAudioInject.h`/
-`injectTone.c` still live here (`src/`) - this is where they're actively
-developed, and `maze_host.cpp` needs `forceAudioInject.h`'s shared ring
-layout regardless. But the *deployed addon* is no longer this repo's own
-`addon/` folder - it's the separate, standalone
-[`ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
-addon in the MockbaMod fork, which owns arming the shared `LD_PRELOAD` tap
-exclusively (see its own README.md for why: one arming addon, many voice
-addons attaching to it, rather than every voice addon bundling its own
-copy and racing on the same file). `scripts/build_audiotap.sh` still
-builds into this repo's `addon/` as a staging output; after building,
-copy `addon/forceAudioIn.so` and `addon/injectTone` into that addon's
-folder by hand (or script it, if this split proves durable). This
-addon's own `manage.sh`/`run_maze_host.sh` no longer touch `LD_PRELOAD`
-or `acvs` at all - see "Shipped baseline" below.
+**Deployment split, then a full repo split (2026-09-13):** `forceAudioIn.c`/
+`injectTone.c` and their zig build script used to live here (`src/`,
+`scripts/build_audiotap.sh`), staged into this repo's own `addon/` and then
+hand-copied into the MockbaMod fork's `SD/AddOns/ForceAudioIn`. They've now
+moved entirely into their own repo,
+[`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn) - that repo owns
+arming the shared `LD_PRELOAD` tap exclusively (see its own README.md for
+why: one arming addon, many voice addons attaching to it, rather than every
+voice addon bundling its own copy and racing on the same file), and is the
+source for what's deployed in the MockbaMod fork at
+[`SD/AddOns/ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn).
+`maze_host.cpp` still needs `forceAudioInject.h`'s shared ring layout, so
+this repo keeps a vendored copy of just that one header (`src/forceAudioInject.h`,
+marked at its top as vendored - must stay byte-for-byte identical to the
+canonical copy). This repo's own `addon/manage.sh`/`run_maze_host.sh` don't
+touch `LD_PRELOAD` or `acvs` at all - see "Shipped baseline" below.
 
 ## What we ruled out (read before re-adding either)
 
@@ -173,6 +174,12 @@ the ruled-out adaptive-controller experiment above.
 
 ## Boot-time LD_PRELOAD race (confirmed 2026-09-13 - the serious one)
 
+*(This section and the three below it are about `forceAudioIn.so` itself,
+which has since moved into its own repo - see
+[`ForceAudioIn/DESIGN.md`](https://github.com/sd88me/ForceAudioIn/blob/main/DESIGN.md)
+for the canonical, kept-up-to-date version of this history. Left here
+too since this project's own testing is what surfaced most of it.)*
+
 A completely different, much more consequential race, discovered after real
 overnight boot failures unrelated to any active development: pads/buttons
 dead, or WiFi dead, alternating unpredictably across successive reboots,
@@ -251,16 +258,16 @@ described by systemd itself as "InMusic MPC Application". Confirmed live;
 
 ## Toolchain
 
-Two separate build paths:
-- `maze_host` (needs RtMidi + ALSA headers): native armhf-under-QEMU
-  Docker build, identical toolchain to `force-acid` (`scripts/Dockerfile`,
-  `scripts/build.sh`) - `arm32v7/debian:stretch`, not `buster` (EOL apt
-  issues), `GLIBC_2.4`/`GLIBCXX_3.4.22` required, comfortably under the
-  Force's actual `GLIBCXX_3.4.32` ceiling.
-- `forceAudioIn.so`/`injectTone` (just libc/libpthread/librt, no ALSA
-  symbols needed directly): cross-compiled with `zig cc -target
-  arm-linux-gnueabihf.2.39` (matches the Force's exact glibc, confirmed
-  live) - no Docker needed at all. See `scripts/build_audiotap.sh`.
+`maze_host` (needs RtMidi + ALSA headers): native armhf-under-QEMU Docker
+build, identical toolchain to `force-acid` (`scripts/Dockerfile`,
+`scripts/build.sh`) - `arm32v7/debian:stretch`, not `buster` (EOL apt
+issues), `GLIBC_2.4`/`GLIBCXX_3.4.22` required, comfortably under the
+Force's actual `GLIBCXX_3.4.32` ceiling.
+
+`forceAudioIn.so`/`injectTone` are no longer built from this repo - see the
+separate [`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn) repo's
+own `scripts/build.sh` (still the same `zig cc -target
+arm-linux-gnueabihf.2.39` cross-build, no Docker needed).
 
 ## Web GUI
 

@@ -38,13 +38,15 @@ its render output going into a shared-memory ring instead of MIDI out.
 (bundled with the `ForceLinkAudio` addon, which taps `snd_pcm_writei` to
 **extract** what MPC plays): this taps `snd_pcm_readi` to **inject** synthesized
 audio into what MPC reads from its capture device. It's a general-purpose
-mechanism, not maze-voice-specific, and (as of 2026-09-13) deployed as its
-**own standalone addon**, [`ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
-in the MockbaMod fork — this repo depends on it rather than bundling it, so
-several voice addons can share one tap instead of each racing to arm their
-own copy. `injectTone.c` (also part of that addon now) is a fixed-tone
-stand-in producer used to prove the injection path works before wiring up
-a real DSP engine.
+mechanism, not maze-voice-specific, and lives in its own repo,
+[`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn) (split out of this
+repo on 2026-09-13 — its source used to live here), deployed as its own
+standalone addon in the MockbaMod fork's
+[`SD/AddOns/ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
+— this repo depends on it rather than bundling it, so several voice addons
+can share one tap instead of each racing to arm their own copy. That repo's
+`injectTone.c` is a fixed-tone stand-in producer used to prove the
+injection path works before wiring up a real DSP engine.
 
 ## Layout
 
@@ -52,9 +54,9 @@ a real DSP engine.
 src/
   maze_voice.c         schwung-maze's DSP core, byte-for-byte verbatim
   maze_host.cpp         RtMidi in, timer-driven render, writes to the ring
-  forceAudioIn.c         LD_PRELOAD tap: mixes the ring into MPC's capture reads
-  injectTone.c           fixed-tone test producer (smoke-test only)
-  forceAudioInject.h      shared-memory ring layout, used by all three above
+  forceAudioInject.h      shared-memory ring layout — vendored from the
+                         separate ForceAudioIn repo (its own canonical copy);
+                         keep byte-for-byte identical, it's a shared ABI
   include/plugin_api_v1.h Schwung's plugin ABI (v1 host_api, v1/v2 plugin API)
   rtmidi/                 vendored RtMidi 6 (ALSA backend)
 addon/                  MockbaMod addon (the ENGINE): manage.sh (no longer
@@ -65,7 +67,7 @@ addon/                  MockbaMod addon (the ENGINE): manage.sh (no longer
                         template), web/ (bundled copy of the web GUI below
                         - a separate addon in its own right). Does NOT
                         bundle forceAudioIn.so/injectTone - see the
-                        separate ForceAudioIn addon.
+                        separate ForceAudioIn repo/addon.
 web/                    a SEPARATE addon (the web panel), independently
                         enabled - see "Deploy / enable"
   index.html            control panel - ported verbatim in style/layout from
@@ -81,8 +83,6 @@ web/                    a SEPARATE addon (the web panel), independently
 scripts/
   Dockerfile, build.sh          armhf-native (QEMU) build for maze_host,
                                 same toolchain as force-acid
-  build_audiotap.sh             zig cross-build for forceAudioIn.so/injectTone
-                                (no Docker needed - see script header)
   build_xtk.py, xtk-seed.json    generates addon/Force Maze Control.xtk
 docs/
   CC-MAP.md                      the 16 Q-Link knobs' CC assignments
@@ -96,22 +96,21 @@ nodeserver-integration/  patches for the SEPARATE nodeServer addon (home-page
 
 ```bash
 ./scripts/build.sh                       # maze_host, via Docker/QEMU armhf-native
-ZIG=/path/to/zig ./scripts/build_audiotap.sh   # forceAudioIn.so + injectTone, via zig
 ```
 
-`build.sh` writes straight into `addon/`, ready to deploy as-is.
-`build_audiotap.sh` writes into `addon/` too, but only as a staging
-output - see its header comment and DESIGN.md's "Deployment split": the
-actual deploy target for those two files is the separate `ForceAudioIn`
-addon, not this repo's own `addon/`.
+Writes straight into `addon/`, ready to deploy as-is. `forceAudioIn.so`/
+`injectTone` are no longer built from this repo at all — see the separate
+[`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn) repo's own
+`scripts/build.sh`.
 
 ## Deploy / enable
 
 Two independent things need to be on the device, in order:
 
-1. **The shared tap** - the separate
-   [`ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
-   addon, enabled once (`manage.sh ENABLE`). This is what actually arms
+1. **The shared tap** - the separate [`ForceAudioIn`](https://github.com/sd88me/ForceAudioIn)
+   addon (already bundled in the MockbaMod fork at
+   [`SD/AddOns/ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)),
+   enabled once (`manage.sh ENABLE`). This is what actually arms
    `LD_PRELOAD`, and it only ever attaches zero voices at boot - see its
    own README for why. If it's already enabled (e.g. another voice addon
    needs it too), nothing more to do here.
