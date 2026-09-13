@@ -1,8 +1,9 @@
-/dist/
-/obj/
+dist/
+obj/
 *.o
-/scratch/
+scratch/
+__pycache__/
 
-# addon/ ships prebuilt binaries deliberately (forceAudioIn.so, maze_host) so
-# the addon folder is ready to deploy as-is - don't ignore those.
-addon/injectTone
+# each module's addon/ ships prebuilt binaries deliberately (maze_host,
+# maze_seq_host) so the addon folder is ready to deploy as-is - none of the
+# patterns above touch addon/, and that's intentional.
