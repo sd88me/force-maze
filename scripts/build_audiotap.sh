@@ -13,6 +13,14 @@
 #   curl -sL -o zig.tar.xz https://ziglang.org/download/<version>/zig-x86_64-linux-<version>.tar.xz
 #   tar xf zig.tar.xz
 # then point ZIG below at .../zig-x86_64-linux-<version>/zig, or put it on PATH.
+#
+# DEPLOY TARGET (2026-09-13): this builds into THIS repo's addon/ as a
+# staging output only. The actual deployed addon is the separate,
+# standalone ForceAudioIn addon in the MockbaMod fork - after building,
+# copy addon/forceAudioIn.so and addon/injectTone into
+# MockbaMod/SD/AddOns/ForceAudioIn/ by hand. ForceMazeVoice's own addon/
+# folder does NOT bundle either of these anymore - see DESIGN.md's
+# "Deployment split" note.
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."

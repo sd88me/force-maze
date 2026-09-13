@@ -38,9 +38,13 @@ its render output going into a shared-memory ring instead of MIDI out.
 (bundled with the `ForceLinkAudio` addon, which taps `snd_pcm_writei` to
 **extract** what MPC plays): this taps `snd_pcm_readi` to **inject** synthesized
 audio into what MPC reads from its capture device. It's a general-purpose
-mechanism, not maze-voice-specific — `injectTone.c` is a fixed-tone stand-in
-producer used to prove the injection path works before wiring up a real DSP
-engine.
+mechanism, not maze-voice-specific, and (as of 2026-09-13) deployed as its
+**own standalone addon**, [`ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
+in the MockbaMod fork — this repo depends on it rather than bundling it, so
+several voice addons can share one tap instead of each racing to arm their
+own copy. `injectTone.c` (also part of that addon now) is a fixed-tone
+stand-in producer used to prove the injection path works before wiring up
+a real DSP engine.
 
 ## Layout
 
@@ -53,12 +57,15 @@ src/
   forceAudioInject.h      shared-memory ring layout, used by all three above
   include/plugin_api_v1.h Schwung's plugin ABI (v1 host_api, v1/v2 plugin API)
   rtmidi/                 vendored RtMidi 6 (ALSA backend)
-addon/                  MockbaMod addon (the ENGINE): manage.sh,
-                        run_maze_host.sh, prebuilt forceAudioIn.so +
+addon/                  MockbaMod addon (the ENGINE): manage.sh (no longer
+                        touches LD_PRELOAD/acvs - see below), prebuilt
                         maze_host, module.json, NSMODULE.json (nodeServer
-                        Modules-page descriptor), Force Maze Control.xtk
-                        (Q-Link track template), web/ (bundled copy of the
-                        web GUI below - a separate addon in its own right)
+                        Modules-page descriptor, Autoload deliberately
+                        disabled), Force Maze Control.xtk (Q-Link track
+                        template), web/ (bundled copy of the web GUI below
+                        - a separate addon in its own right). Does NOT
+                        bundle forceAudioIn.so/injectTone - see the
+                        separate ForceAudioIn addon.
 web/                    a SEPARATE addon (the web panel), independently
                         enabled - see "Deploy / enable"
   index.html            control panel - ported verbatim in style/layout from
@@ -92,16 +99,35 @@ nodeserver-integration/  patches for the SEPARATE nodeServer addon (home-page
 ZIG=/path/to/zig ./scripts/build_audiotap.sh   # forceAudioIn.so + injectTone, via zig
 ```
 
-Both write straight into `addon/`, which is then ready to deploy as-is.
+`build.sh` writes straight into `addon/`, ready to deploy as-is.
+`build_audiotap.sh` writes into `addon/` too, but only as a staging
+output - see its header comment and DESIGN.md's "Deployment split": the
+actual deploy target for those two files is the separate `ForceAudioIn`
+addon, not this repo's own `addon/`.
 
 ## Deploy / enable
 
-```
-ssh root@<force-ip> 'rm -rf /media/662522/AddOns/ForceMazeVoice'   # see note below
-scp -r addon root@<force-ip>:/media/662522/AddOns/ForceMazeVoice
-ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/manage.sh ENABLE'          # the engine
-ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/web/manage.sh ENABLE'      # the web panel
-```
+Two independent things need to be on the device, in order:
+
+1. **The shared tap** - the separate
+   [`ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
+   addon, enabled once (`manage.sh ENABLE`). This is what actually arms
+   `LD_PRELOAD`, and it only ever attaches zero voices at boot - see its
+   own README for why. If it's already enabled (e.g. another voice addon
+   needs it too), nothing more to do here.
+2. **This addon** (the engine):
+   ```
+   ssh root@<force-ip> 'rm -rf /media/662522/AddOns/ForceMazeVoice'   # see note below
+   scp -r addon root@<force-ip>:/media/662522/AddOns/ForceMazeVoice
+   ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/manage.sh ENABLE'
+   ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/web/manage.sh ENABLE'   # the web panel
+   ```
+   `ENABLE` here does **not** touch `LD_PRELOAD` or restart `acvs` - it
+   never has to, since the tap is ForceAudioIn's job now. Start `maze_host`
+   itself from the nodeServer Modules page (`/moduler`) once both addons
+   are in place - never at boot (Autoload is deliberately unavailable for
+   this module - see NSMODULE.json and DESIGN.md's "hard rule": an `acvs`
+   restart while a voice is attached reliably kills pads/buttons).
 
 **The `rm -rf` first matters**: `scp -r addon dest` copies `addon` itself
 as a subdirectory of `dest` if `dest` already exists (`dest/addon/...`)
@@ -109,15 +135,12 @@ rather than merging its contents into `dest` - hit this live while
 redeploying (2026-09-13). Safe to skip only when deploying to a path that
 doesn't exist yet.
 
-**The engine and the web panel are two separate addons now** (`addon/`'s
-own `manage.sh` vs. `addon/web/manage.sh`) - enabling one does not enable
-the other. The engine's `ENABLE`/`DISABLE` restarts the Force's `acvs`
-service (the main app) to arm/disarm the `LD_PRELOAD` tap - see `DESIGN.md`
-for why, and for real-hardware incidents worth reading before touching this
-again. The web panel has no such requirement and can stay always-on (like
-`force-acid`'s own web panel) even while the engine is disabled - every
-control on the page just answers 503 until the engine's control socket
-exists.
+**The engine and the web panel are two separate addons** (`addon/`'s own
+`manage.sh` vs. `addon/web/manage.sh`) - enabling one does not enable the
+other. The web panel has no `LD_PRELOAD`/`acvs` involvement at all and can
+stay always-on (like `force-acid`'s own web panel) even while the engine
+is stopped - every control on the page just answers 503 until
+`maze_host`'s control socket exists.
 
 Then: route a MIDI track to `Mockba Maze:In` for notes, and monitor/record
 from whichever Audio-In track corresponds to the Force's `hw:2` capture

@@ -58,6 +58,22 @@ on the one capture handle MPC actually reads (confirmed live: `hw:2`, two
 shapes get `hw_params`'d - 4ch and 2ch - only the 2ch one is ever actually
 read).
 
+**Deployment split (2026-09-13):** `forceAudioIn.c`/`forceAudioInject.h`/
+`injectTone.c` still live here (`src/`) - this is where they're actively
+developed, and `maze_host.cpp` needs `forceAudioInject.h`'s shared ring
+layout regardless. But the *deployed addon* is no longer this repo's own
+`addon/` folder - it's the separate, standalone
+[`ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
+addon in the MockbaMod fork, which owns arming the shared `LD_PRELOAD` tap
+exclusively (see its own README.md for why: one arming addon, many voice
+addons attaching to it, rather than every voice addon bundling its own
+copy and racing on the same file). `scripts/build_audiotap.sh` still
+builds into this repo's `addon/` as a staging output; after building,
+copy `addon/forceAudioIn.so` and `addon/injectTone` into that addon's
+folder by hand (or script it, if this split proves durable). This
+addon's own `manage.sh`/`run_maze_host.sh` no longer touch `LD_PRELOAD`
+or `acvs` at all - see "Shipped baseline" below.
+
 ## What we ruled out (read before re-adding either)
 
 **LD_PRELOAD is not monolithically risky.** `mockbaMagic`'s raw in-memory
