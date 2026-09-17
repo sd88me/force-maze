@@ -91,6 +91,27 @@ control panel (`web/`), which covers every CC. A second template for a
 second Q-Link bank is possible later if that turns out to matter in
 practice.
 
+### Leftover donor-addon data (found, fixed)
+
+The shared seed's `customQLinks` was always fully overwritten, but two
+other fields carried real, un-scrubbed state from whatever addon it was
+actually captured controlling (see `force-acid`'s own `docs/capture-xtk.md`
+for the full investigation): `data.program.customisable.mapping` (127
+entries, a different addon's own generator-parameter names) and
+`midiInputRoute`/`midiOutputRoute` (pointed at `"Mockba Harpie 4T"` instead
+of this project's own `"Mockba Maze"` ALSA client, `src/maze_host.cpp`'s
+`--client` default). Both are now scrubbed by `blank_mapping()`/
+`fix_midi_routes()` in `scripts/build_xtk.py`, and `audit()` refuses to
+build if any leftover donor-addon string survives.
+
+Every build also always writes `<out>.json` next to the `.xtk` — the
+reviewable form. Hand-edit it after a real-hardware finding, then rebuild
+straight from it without touching the generation script:
+
+```bash
+python3 scripts/build_xtk.py --pack "addon/Force Maze Control.xtk.json"
+```
+
 ## Status: NOT YET visually confirmed on a real screen
 
 The file is structurally valid (round-trips through gzip/JSON correctly,

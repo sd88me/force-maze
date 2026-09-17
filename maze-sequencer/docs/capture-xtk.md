@@ -42,6 +42,26 @@ Regenerate it (same command) if `docs/CC-MAP.md`'s CC assignments ever
 change — the two need to stay in sync by hand, same convention as
 `host_shim.cpp`'s `PARAMS[]` table.
 
+### Leftover donor-addon data (found, fixed)
+
+The shared seed's `customQLinks` was always fully overwritten, but two
+other fields carried real, un-scrubbed state from whatever addon it was
+actually captured controlling (see `force-acid`'s own `docs/capture-xtk.md`
+for the full investigation): `data.program.customisable.mapping` (127
+entries, a different addon's own generator-parameter names) and
+`midiInputRoute`/`midiOutputRoute` (pointed at `"Mockba Harpie 4T"` instead
+of this project's own `"Mockba Maze Seq"` ALSA client). Both are now
+scrubbed by `blank_mapping()`/`fix_midi_routes()`, and `audit()` refuses to
+build if any leftover donor-addon string survives.
+
+Every build also always writes `<out>.json` next to the `.xtk` — the
+reviewable form. Hand-edit it after a real-hardware finding, then rebuild
+straight from it without touching the generation script:
+
+```bash
+python3 scripts/build_xtk.py --pack "addon/Force Maze Seq Control.xtk.json"
+```
+
 **`pad_semis` is deliberately left out** of the 16-knob template — it's the
 least-used control of the set (a semitone offset that on Move came from the
 pad keyboard, no direct Force equivalent) and something had to give to fit
