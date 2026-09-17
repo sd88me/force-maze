@@ -254,7 +254,7 @@ static void usage(const char *me) {
     std::fprintf(stderr,
         "usage: %s [options]\n"
         "  -v                    verbose (log every param change)\n"
-        "  --client NAME         ALSA client name       (default: Mockba Maze Seq)\n"
+        "  --client NAME         ALSA client name       (default: Maze Seq)\n"
         "  --module-dir PATH     dir to persist maze_seq.bin in (default: .)\n"
         "  --ctrl-sock PATH      control socket path     (default: /tmp/maze_seq_ctrl.sock)\n"
         "  --control-channel N   1-16, CC-in             (default: 1)\n",
@@ -262,7 +262,7 @@ static void usage(const char *me) {
 }
 
 int main(int argc, char **argv) {
-    std::string client = "Mockba Maze Seq";
+    std::string client = "Maze Seq";
     std::string module_dir = ".";
 
     for (int i = 1; i < argc; i++) {
@@ -289,8 +289,8 @@ int main(int argc, char **argv) {
     try {
         in = new RtMidiIn(RtMidi::UNSPECIFIED, client, 256);
         g_out = new RtMidiOut(RtMidi::UNSPECIFIED, client);
-        in->openVirtualPort("In");
-        g_out->openVirtualPort("Out");
+        in->openVirtualPort("In (Mockba)");
+        g_out->openVirtualPort("Out (Mockba)");
         in->ignoreTypes(true, false, true);   /* sysex off, TIMING ON (0xF8 clock), sensing off */
         in->setCallback(&on_midi_cb, nullptr);
     } catch (RtMidiError &e) {
@@ -305,9 +305,9 @@ int main(int argc, char **argv) {
     std::signal(SIGTERM, on_signal);
 
     std::fprintf(stderr,
-        "[maze-seq] up. port '%s:In' / '%s:Out'  ctrl ch %d  ctrl sock %s  state file %s/maze_seq.bin\n"
-        "[maze-seq] connect Force transport SYNC+CLOCK to '%s:In', route a MIDI track\n"
-        "[maze-seq] to it on ch %d for CC control, and instrument track(s) FROM '%s:Out'\n"
+        "[maze-seq] up. port '%s:In (Mockba)' / '%s:Out (Mockba)'  ctrl ch %d  ctrl sock %s  state file %s/maze_seq.bin\n"
+        "[maze-seq] connect Force transport SYNC+CLOCK to '%s:In (Mockba)', route a MIDI track\n"
+        "[maze-seq] to it on ch %d for CC control, and instrument track(s) FROM '%s:Out (Mockba)'\n"
         "[maze-seq] on whichever channel(s) s1_channel/s2_channel are set to.\n",
         client.c_str(), client.c_str(), g_ctrl_ch + 1, g_ctrl_sock_path.c_str(), module_dir.c_str(),
         client.c_str(), g_ctrl_ch + 1, client.c_str());

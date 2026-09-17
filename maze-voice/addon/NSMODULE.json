@@ -1,5 +1,5 @@
 {
-  "NAME": "Force Maze Voice",
+  "NAME": "Maze Voice",
   "DESCRIPTION": "Moog Labyrinth-style thru-zero oscillator/wavefolder/filter voice (port of the Schwung 'Maze Voice' module for Ableton Move). Headless: control it from a Force MIDI track via CC, or from the web panel. Requires the separate ForceAudioIn addon to be enabled (arms the shared injection tap at boot, zero voices) - this toggle only starts/stops the maze_host process itself, no LD_PRELOAD/acvs involved. Autoload is deliberately unavailable here: a voice must never be attached before an acvs restart (see DESIGN.md) - always start it after boot, from this page. See README.md / CC-MAP.md.",
   "PROCESSNAME": "maze_host",
   "DIRNAME": "ForceMazeVoice",

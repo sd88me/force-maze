@@ -11,7 +11,7 @@ writeup; this file only covers what's specific to this module.
 
 Automatic: nodeServer's `moduler` endpoint scans every `AddOns/*/NSMODULE.json`
 and lists whatever it finds. Once `addon/NSMODULE.json` is deployed inside
-`AddOns/ForceMazeSeq/`, "Force Maze Sequencer" just appears there, with
+`AddOns/ForceMazeSeq/`, "Maze Sequencer" just appears there, with
 start/stop + autolaunch-toggle controls. Unlike Maze Voice, toggling
 autolaunch here is safe at any time - no `LD_PRELOAD`/`acvs` boot-race
 concern (see `../DESIGN.md`), and `NSMODULE.json` already sets
@@ -27,18 +27,18 @@ this gotcha if you ever add an argument.
 
 1. Copy `mazeseq.js` to nodeServer's `app/api/endpoints/mazeseq.js`.
 2. Add this entry to `app/api/ENDPOINTS.js`'s exported array (after the
-   "Force Maze Voice" entry is a reasonable place):
+   "Maze Voice" entry is a reasonable place):
 
 ```js
     {
-        // Force Maze Sequencer runs its own standalone server (not an
+        // Maze Sequencer runs its own standalone server (not an
         // in-process nodeServer module -- see web/README or server.py).
         // URL/PARAM stay a plain relative path on purpose (home.js's
         // escape() call mangles absolute "http://host:port" URLs -- see
         // mazeseq.js); clicking this link hits nodeServer's own /mazeseq
         // route, which mazeseq.js immediately 302-redirects out to the
         // real panel.
-        NAME: "Force Maze Sequencer",
+        NAME: "Maze Sequencer",
         PATH: "./api/endpoints/mazeseq.js",
         PARAM: "/mazeseq",
         URL: "/mazeseq",
@@ -68,7 +68,7 @@ prefix.** `app/server.js` dispatches with `req.url.startsWith(e.PARAM)`,
 first match in `ENDPOINTS.js`'s array order wins. The route above was
 originally named `/forcemazeseq` (mirroring `forceacid`/`forcemaze`'s
 naming) and was silently unreachable: every request for it also starts with
-the earlier-registered `/forcemaze` (Force Maze Voice), so the router
+the earlier-registered `/forcemaze` (Maze Voice), so the router
 matched that entry first and redirected to the wrong port every time - no
 error, no 404, just the wrong panel. Confirmed live, fixed by renaming to
 `/mazeseq`, which shares no prefix with any existing route. See

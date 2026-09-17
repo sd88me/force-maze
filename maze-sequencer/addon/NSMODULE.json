@@ -1,5 +1,5 @@
 {
-  "NAME": "Force Maze Sequencer",
+  "NAME": "Maze Sequencer",
   "DESCRIPTION": "Dual generative 8-step sequencer (Moog Labyrinth style), clock-synced to the Force transport (port of the Schwung 'Maze' tool for Ableton Move). Headless: control it from a Force MIDI track via CC, or from the web panel. Independent per-sequencer output MIDI channel (Seq 1/Seq 2). See README.md / CC-MAP.md.",
   "PROCESSNAME": "maze_seq_host",
   "DIRNAME": "ForceMazeSeq",

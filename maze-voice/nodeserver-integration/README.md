@@ -13,8 +13,8 @@ same way.
 Automatic: nodeServer's `moduler` endpoint (`api/endpoints/moduler/index.js`)
 scans every `AddOns/*/NSMODULE.json` and lists whatever it finds, with
 start/stop + autolaunch-toggle controls driven entirely by that file. Once
-`addon/NSMODULE.json` is deployed inside `AddOns/ForceMazeVoice/`, "Force
-Maze Voice" just appears there - see that file's own `DESCRIPTION` for the
+`addon/NSMODULE.json` is deployed inside `AddOns/ForceMazeVoice/`, "Maze
+Voice" just appears there - see that file's own `DESCRIPTION` for the
 one caveat (toggling RUNNING there starts/stops `maze_host` only, it doesn't
 arm the LD_PRELOAD tap or restart `acvs`).
 
@@ -30,18 +30,18 @@ separate array entries for this reason.
 1. Copy `forcemaze.js` to nodeServer's
    `app/api/endpoints/forcemaze.js`.
 2. Add this entry to `app/api/ENDPOINTS.js`'s exported array (after the
-   "Force Acid" entry is a reasonable place):
+   "Acid" entry is a reasonable place):
 
 ```js
     {
-        // Force Maze Voice runs its own standalone server (not an in-process
+        // Maze Voice runs its own standalone server (not an in-process
         // nodeServer module -- see force-maze/web/README or server.py). URL/
         // PARAM stay a plain relative path on purpose (home.js's escape()
         // call mangles absolute "http://host:port" URLs -- see
         // forcemaze.js); clicking this link hits nodeServer's own
         // /forcemaze route, which forcemaze.js immediately 302-redirects
         // out to the real panel.
-        NAME: "Force Maze Voice",
+        NAME: "Maze Voice",
         PATH: "./api/endpoints/forcemaze.js",
         PARAM: "/forcemaze",
         URL: "/forcemaze",

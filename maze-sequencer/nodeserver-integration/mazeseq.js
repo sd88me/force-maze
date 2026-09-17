@@ -18,7 +18,7 @@
 // NOTE: the target IP is hardcoded below, matching this repo's other
 // redirect endpoints (same Force device). If the Force's IP changes (no
 // DHCP reservation set), update it here -- see ENDPOINTS.js's entry for
-// "Force Maze Sequencer".
+// "Maze Sequencer".
 module.exports = { INIT };
 
 function INIT(req, res) {
