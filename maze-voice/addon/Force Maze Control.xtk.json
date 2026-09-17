@@ -1708,7 +1708,7 @@
     "midiInputRoute": {
       "inputPort": {
         "type": 0,
-        "deviceName": "Mockba Maze",
+        "deviceName": "Maze:In (Mockba)",
         "deviceId": "0-0",
         "os": "Linux"
       },
@@ -1717,7 +1717,7 @@
     "midiOutputRoute": {
       "outputPort": {
         "type": 1,
-        "deviceName": "Mockba Maze - CH:1",
+        "deviceName": "Maze:In (Mockba)",
         "deviceId": "0-0",
         "os": "Linux"
       },
