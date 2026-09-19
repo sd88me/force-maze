@@ -123,5 +123,5 @@ Inherits `schwung-maze`'s terms for `maze_seq_core.c`.
 (Sequencer A / B: corrupt, CV range, length, channel) and GLOBAL (scale, key,
 transpose, pad transpose, note rate/length, trig mix, reset, panic). Enums
 with more than 6 options (scale, key, channel, note length) are index knobs.
-Not yet on the page: the step-bit LEDs and advance buttons (no matching
-widget in force-shadow yet). Deploy to `AddOns/ForceMazeSeq/shadow_page.conf`.
+Each sequencer has a row of 8 tappable step LEDs (tap = flip, white halo = play head),
+needing force-shadow's `bits` widget. The advance buttons are not on the page. Deploy to `AddOns/ForceMazeSeq/shadow_page.conf`.
