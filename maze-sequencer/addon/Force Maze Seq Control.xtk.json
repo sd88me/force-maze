@@ -1,7 +1,7 @@
 {
   "data": {
     "version": 3,
-    "name": "Force Maze Seq Control",
+    "name": "MAZE SEQ CTRL",
     "volume": 0.921875,
     "volumeKnown": true,
     "pan": 0.4921875,
@@ -20,7 +20,7 @@
     "samples": [],
     "program": {
       "version": 1,
-      "name": "Force Maze Seq Control",
+      "name": "MAZE SEQ CTRL",
       "type": 4,
       "programPads": {
         "Universal": {
@@ -740,105 +740,105 @@
         "mapping": [
           {
             "parameterIndex": "0 0 0",
-            "automationIndex": 2147483647,
+            "automationIndex": 34,
             "value": 0.0,
-            "name": ""
+            "name": "S1 CHANNEL"
           },
           {
             "parameterIndex": "0 0 1",
-            "automationIndex": 2147483647,
+            "automationIndex": 35,
             "value": 0.0,
-            "name": ""
+            "name": "S2 CHANNEL"
           },
           {
             "parameterIndex": "0 0 2",
-            "automationIndex": 2147483647,
+            "automationIndex": 36,
             "value": 0.0,
-            "name": ""
+            "name": "TRANSPOSE"
           },
           {
             "parameterIndex": "0 0 3",
-            "automationIndex": 2147483647,
+            "automationIndex": 38,
             "value": 0.0,
-            "name": ""
+            "name": "PANIC"
           },
           {
             "parameterIndex": "0 0 4",
-            "automationIndex": 2147483647,
+            "automationIndex": 30,
             "value": 0.0,
-            "name": ""
+            "name": "SCALE"
           },
           {
             "parameterIndex": "0 0 5",
-            "automationIndex": 2147483647,
+            "automationIndex": 31,
             "value": 0.0,
-            "name": ""
+            "name": "KEY"
           },
           {
             "parameterIndex": "0 0 6",
-            "automationIndex": 2147483647,
+            "automationIndex": 32,
             "value": 0.0,
-            "name": ""
+            "name": "NOTE RATE"
           },
           {
             "parameterIndex": "0 0 7",
-            "automationIndex": 2147483647,
+            "automationIndex": 33,
             "value": 0.0,
-            "name": ""
+            "name": "NOTE LEN"
           },
           {
             "parameterIndex": "0 0 8",
-            "automationIndex": 2147483647,
+            "automationIndex": 24,
             "value": 0.0,
-            "name": ""
+            "name": "S2 CORRUPT"
           },
           {
             "parameterIndex": "0 0 9",
-            "automationIndex": 2147483647,
+            "automationIndex": 25,
             "value": 0.0,
-            "name": ""
+            "name": "S2 RANGE"
           },
           {
             "parameterIndex": "0 0 10",
-            "automationIndex": 2147483647,
+            "automationIndex": 26,
             "value": 0.0,
-            "name": ""
+            "name": "S2 LENGTH"
           },
           {
             "parameterIndex": "0 0 11",
-            "automationIndex": 2147483647,
+            "automationIndex": 27,
             "value": 0.0,
-            "name": ""
+            "name": "RESET BOTH"
           },
           {
             "parameterIndex": "0 0 12",
-            "automationIndex": 2147483647,
+            "automationIndex": 20,
             "value": 0.0,
-            "name": ""
+            "name": "S1 CORRUPT"
           },
           {
             "parameterIndex": "0 0 13",
-            "automationIndex": 2147483647,
+            "automationIndex": 21,
             "value": 0.0,
-            "name": ""
+            "name": "S1 RANGE"
           },
           {
             "parameterIndex": "0 0 14",
-            "automationIndex": 2147483647,
+            "automationIndex": 22,
             "value": 0.0,
-            "name": ""
+            "name": "S1 LENGTH"
           },
           {
             "parameterIndex": "0 0 15",
-            "automationIndex": 2147483647,
+            "automationIndex": 23,
             "value": 0.0,
-            "name": ""
+            "name": "TRIG MIX"
           },
           {
             "parameterIndex": "1 0 0",
-            "automationIndex": 2147483647,
+            "automationIndex": 37,
             "value": 0.0,
-            "name": ""
+            "name": "PAD SEMIS"
           },
           {
             "parameterIndex": "1 0 1",
@@ -1652,7 +1652,7 @@
           "loop": false,
           "legato": true,
           "launch": 0,
-          "name": "Force Maze Seq Control",
+          "name": "MAZE SEQ CTRL",
           "colour": 0,
           "eventList": {
             "length": 9223372036854775807,
@@ -1681,7 +1681,7 @@
           "loop": true,
           "legato": false,
           "launch": 0,
-          "name": "Force Maze Seq Control 1",
+          "name": "MAZE SEQ CTRL 1",
           "colour": 0,
           "eventList": {
             "length": 9223372036854775807,
