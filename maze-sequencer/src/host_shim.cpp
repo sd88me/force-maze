@@ -205,8 +205,29 @@ static void handle_ctrl_line(int fd, const std::string &line) {
     if (!strcmp(cmd, "GET") && sscanf(line.c_str(), "%*s %63s", key) == 1) {
         char buf[512];
         int n;
+        /* Name lists for the shadow page's list widgets (scale/key pickers). */
+        static const char SCALE_NAMES[] = "[{\"name\":\"Chromatic\"},{\"name\":\"Major\"},{\"name\":\"Minor\"},{\"name\":\"Pent Maj\"},{\"name\":\"Pent Min\"},{\"name\":\"Mel Min\"},{\"name\":\"Harm Min\"},{\"name\":\"Whole\"},{\"name\":\"Hirajoshi\"},{\"name\":\"Major 7\"},{\"name\":\"Minor 7\"},{\"name\":\"Unquant\"}]\n";
+        static const char KEY_NAMES[] = "[{\"name\":\"C\"},{\"name\":\"C Sharp\"},{\"name\":\"D\"},{\"name\":\"D Sharp\"},{\"name\":\"E\"},{\"name\":\"F\"},{\"name\":\"F Sharp\"},{\"name\":\"G\"},{\"name\":\"G Sharp\"},{\"name\":\"A\"},{\"name\":\"A Sharp\"},{\"name\":\"B\"}]\n";
+        if (!strcmp(key, "scale_names")) { send(fd, SCALE_NAMES, sizeof(SCALE_NAMES) - 1, 0); return; }
+        if (!strcmp(key, "key_names"))   { send(fd, KEY_NAMES, sizeof(KEY_NAMES) - 1, 0); return; }
         { std::lock_guard<std::mutex> lk(g_lock);
-          n = g_api->get_param(g_inst, key, buf, sizeof(buf)); }
+          n = g_api->get_param(g_inst, key, buf, sizeof(buf));
+          /* Knob params are set-only in the core: fall back to the flat
+           * "state" JSON (same as web/server.py) so every key is readable. */
+          if (n <= 0) {
+              char sb[512];
+              int sn = g_api->get_param(g_inst, "state", sb, sizeof(sb));
+              if (sn > 0) {
+                  sb[sn < (int)sizeof(sb) ? sn : (int)sizeof(sb) - 1] = 0;
+                  std::string pat = std::string("\"") + key + "\":\"";
+                  const char *p = strstr(sb, pat.c_str());
+                  if (p) {
+                      p += pat.size();
+                      const char *e = strchr(p, '"');
+                      if (e && (size_t)(e - p) < sizeof(buf)) { memcpy(buf, p, (size_t)(e - p)); n = (int)(e - p); }
+                  }
+              }
+          } }
         if (n <= 0) { send(fd, "ERR\n", 4, 0); return; }
         std::string reply(buf, n); reply += "\n";
         send(fd, reply.c_str(), reply.size(), 0);

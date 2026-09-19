@@ -119,9 +119,15 @@ Inherits `schwung-maze`'s terms for `maze_seq_core.c`.
 
 `addon/shadow_page.conf` defines this module's on-device control page for
 [force-shadow](https://github.com/sd88me/force-shadow) (slot 4, opened with
-`SHIFT+SCENE-4`), in the same palette as the web panel. Two tabs: SEQUENCERS
-(Sequencer A / B: corrupt, CV range, length, channel) and GLOBAL (scale, key,
-transpose, pad transpose, note rate/length, trig mix, reset, panic). Enums
-with more than 6 options (scale, key, channel, note length) are index knobs.
-Each sequencer has a row of 8 tappable step LEDs (tap = flip, white halo = play head),
-needing force-shadow's `bits` widget. The advance buttons are not on the page. Deploy to `AddOns/ForceMazeSeq/shadow_page.conf`.
+`SHIFT+SCENE-4`), in the same palette as the web panel. Two tabs:
+
+- **SEQUENCERS** - Sequencer A / B (8 tappable step LEDs: tap = flip, white
+  halo = play head; corrupt, CV range, length, channel; PREV/NEXT advance)
+  plus a TIMING / MIX frame (note rate, note length, trig mix, reset both).
+- **GLOBAL** - SCALE and KEY pickers (tile lists, like DX7's bank/patch
+  picker), transpose, pad transpose, panic.
+
+Needs force-shadow's `bits` widget and `button ... val=`. `maze_seq_host`
+answers `GET scale_names` / `key_names` and falls back to the state JSON for
+any individual key. Deploy to `AddOns/ForceMazeSeq/shadow_page.conf`; the
+host change needs a `scripts/build.sh` rebuild.
