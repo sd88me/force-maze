@@ -121,9 +121,9 @@ Inherits `schwung-maze`'s terms for `maze_seq_core.c`.
 [force-shadow](https://github.com/sd88me/force-shadow) (slot 4, opened with
 `SHIFT+SCENE-4`), in the same palette as the web panel. Two tabs:
 
-- **SEQUENCERS** - Sequencer A / B (8 tappable step LEDs: tap = flip, white
-  halo = play head; corrupt, CV range, length, channel; PREV/NEXT advance)
-  plus a TIMING / MIX frame (note rate, note length, trig mix, reset both).
+- **SEQUENCERS** - left two-thirds: Sequencer A / B stacked (8 tappable step LEDs: tap = flip, white
+  halo = play head; corrupt, CV range, length, channel; ADVANCE steps forward);
+  right third: TIMING / MIX (note rate, note length, trig mix, reset both).
 - **GLOBAL** - SCALE and KEY pickers (tile lists, like DX7's bank/patch
   picker), transpose, pad transpose, panic.
 
