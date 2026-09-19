@@ -114,3 +114,14 @@ touchscreen — see `DESIGN.md`'s TODO list.
 ## License
 
 Inherits `schwung-maze`'s terms for `maze_seq_core.c`.
+
+## Shadow-mode touchscreen page
+
+`addon/shadow_page.conf` defines this module's on-device control page for
+[force-shadow](https://github.com/sd88me/force-shadow) (slot 4, opened with
+`SHIFT+SCENE-4`), in the same palette as the web panel. Two tabs: SEQUENCERS
+(Sequencer A / B: corrupt, CV range, length, channel) and GLOBAL (scale, key,
+transpose, pad transpose, note rate/length, trig mix, reset, panic). Enums
+with more than 6 options (scale, key, channel, note length) are index knobs.
+Not yet on the page: the step-bit LEDs and advance buttons (no matching
+widget in force-shadow yet). Deploy to `AddOns/ForceMazeSeq/shadow_page.conf`.
