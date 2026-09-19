@@ -155,6 +155,18 @@ ch 1, with `addon/Force Maze Control.xtk` loaded onto it for 16 pre-named
 Q-Link knobs. See `docs/CC-MAP.md` for the full assignment (16 of
 `maze_voice.c`'s ~30 params - the rest stay web-only) and setup steps.
 
+## Shadow-mode touchscreen page
+
+`addon/shadow_page.conf` defines this module's on-device control page (3
+tabs: Voice, Wavefolder/Filter, Mod/Random/Mix) for
+[force-shadow](https://github.com/sd88me/force-shadow), which takes over the
+Force's touchscreen (`SHIFT+SCENE-3`) and drives `maze_host` through its
+control socket. It is discovered automatically at force-shadow startup; no
+rebuild is needed to change it. Requires force-shadow v1.0.0 or later (its
+current text renderer -- crisp hinted glyphs, tighter letter spacing -- is
+what this page now looks like). File format: force-shadow's
+`docs/adding-a-page.md`.
+
 ## Status
 
 Working end-to-end and hardware-verified: DSP core ported, note-in (+ CC-in
