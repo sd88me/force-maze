@@ -197,6 +197,21 @@ static void on_midi_cb(double /*dt*/, std::vector<unsigned char> *msg, void * /*
     const uint8_t *b = msg->data();
     size_t len = msg->size();
     uint8_t status = b[0];
+    if (status == 0xF8) {   /* MIDI clock: derive tempo for synced LFOs (24 ppqn), averaged over 24 ticks */
+        static std::chrono::steady_clock::time_point t0; static int n = 0;
+        auto now = std::chrono::steady_clock::now();
+        if (n == 0) t0 = now;
+        if (++n >= 24) {
+            double sec = std::chrono::duration<double>(now - t0).count();
+            if (sec > 0.05) {
+                char bpm[16]; snprintf(bpm, sizeof(bpm), "%.1f", 60.0 / sec);
+                std::lock_guard<std::mutex> lk(g_lock);
+                g_api->set_param(g_inst, "lfo_bpm", bpm);
+            }
+            n = 0;
+        }
+        return;
+    }
     uint8_t type = status & 0xF0;
     uint8_t chan = status & 0x0F;
 
@@ -351,6 +366,10 @@ static bool handle_mix_set(const std::string &key, const std::string &val) {
         g_shm->gain = std::strtof(val.c_str(), nullptr) / 100.0f;
         return true;
     }
+    if (key == "mix.channel_idx") {   /* shadow GUI: index in, index out (label also accepted) */
+        g_shm->channel_mask = (val == "0" || val == "L") ? AI_CHAN_L : (val == "1" || val == "R") ? AI_CHAN_R : AI_CHAN_LR;
+        return true;
+    }
     if (key == "mix.channel") {
         g_shm->channel_mask = (val == "L") ? AI_CHAN_L : (val == "R") ? AI_CHAN_R : AI_CHAN_LR;
         return true;
@@ -362,6 +381,11 @@ static bool handle_mix_get(const std::string &key, std::string &out) {
     if (key == "mix.gain") {
         char b[32]; std::snprintf(b, sizeof(b), "%.1f", g_shm->gain * 100.0f);
         out = b; return true;
+    }
+    if (key == "mix.channel_idx") {
+        uint32_t m = g_shm->channel_mask;
+        out = (m == AI_CHAN_L) ? "0" : (m == AI_CHAN_R) ? "1" : "2";
+        return true;
     }
     if (key == "mix.channel") {
         uint32_t m = g_shm->channel_mask;
@@ -501,9 +525,9 @@ int main(int argc, char **argv) {
     if (!g_inst) { fprintf(stderr, "[maze] create_instance failed\n"); return 1; }
 
     {
-        char buf[8192];
+        static char buf[65536];
         int n = g_api->get_param(g_inst, "chain_params", buf, sizeof(buf));
-        g_chain_params_json = (n > 0) ? std::string(buf, n) : std::string("{}");
+        g_chain_params_json = (n > 0 && n < (int)sizeof(buf)) ? std::string(buf, n) : std::string("{}");
         if (n <= 0)
             fprintf(stderr, "[maze] warning: chain_params not found (module.json missing from %s?)\n",
                     module_dir.c_str());
@@ -513,7 +537,7 @@ int main(int argc, char **argv) {
     try {
         in = new RtMidiIn(RtMidi::UNSPECIFIED, client, 256);
         in->openVirtualPort("In (Mockba)");
-        in->ignoreTypes(true, true, true);
+        in->ignoreTypes(true, false, true);   /* sysex off, TIMING ON (LFO tempo sync), active-sense off */
         in->setCallback(&on_midi_cb, nullptr);
     } catch (RtMidiError &e) {
         fprintf(stderr, "[maze] MIDI setup failed: %s\n", e.getMessage().c_str());

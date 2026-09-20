@@ -404,6 +404,32 @@ function makeMixChanSwitch() {
   return wrap;
 }
 
+/* ---------------------------------------------------------------------
+ * Generic segmented enum switch (LFO shape / sync / division). Wire value is
+ * the numeric index, which maze_voice.c's lfoN_* handlers accept.
+ * ------------------------------------------------------------------- */
+function makeSegSwitch(key, capText, options, def) {
+  const wrap = document.createElement("div"); wrap.className = "order-wrap";
+  const stage = document.createElement("div"); stage.className = "stage";
+  const track = document.createElement("div"); track.className = "order-track";
+  stage.appendChild(track);
+  const topline = document.createElement("div"); topline.className = "topline";
+  const val = document.createElement("div"); val.className = "kval";
+  const segs = options.map((label, i) => {
+    const seg = document.createElement("div"); seg.className = "order-seg mix-chan-seg"; seg.title = label; seg.textContent = label;
+    seg.addEventListener("click", () => commit(i));
+    track.appendChild(seg);
+    return seg;
+  });
+  const cap = document.createElement("div"); cap.className = "cap-label"; cap.textContent = capText;
+  function render(i) { segs.forEach((s, j) => s.classList.toggle("active", j === i)); val.textContent = options[i] || ""; }
+  function commit(i) { render(i); schwungRemote.setParam(P + key, String(i)); }
+  render(def);
+  registry[key] = { set: (v) => { const i = Math.round(parseFloat(v)); if (i >= 0 && i < options.length) render(i); } };
+  wrap.appendChild(stage); wrap.appendChild(topline); wrap.appendChild(val); wrap.appendChild(cap);
+  return wrap;
+}
+
 function makeToggle(item) {
   const wrap = document.createElement("div"); wrap.className = "rnd-block";
   const t = document.createElement("div"); t.className = "toggle";
@@ -528,11 +554,30 @@ panelRows.appendChild(outSection);
  * the Force's Audio-In at once. ---- */
 panelRows.appendChild(buildSection("Output Mix", null, (stack) => {
   const r = row();
-  r.appendChild(col([ makeToggle({ key: "mix.enabled", cap: "Voice Out", def: true }) ]));
+  /* Voice Out (mix.enabled) removed: redundant with the engine on/off switch. */
+  r.appendChild(col([ makeToggle({ key: "out_mode", cap: "External Voice", def: false }) ]));
   r.appendChild(col([ makeMixChanSwitch() ]));
   r.appendChild(col([ makeKnob({ size: "big", key: "mix.gain", cap: "Voice Vol", unit: "%", min: 0, max: 150, def: 100 }) ]));
   stack.appendChild(r);
 }));
+
+/* ---- LFOs (Force only): 2 LFOs x 9 fixed depth destinations - see docs/V2-PLAN.md sec. 3 ---- */
+const LFO_DESTS = [
+  ["vco_pitch","VCO Pitch"],["mod_pitch","Mod Pitch"],["fm_depth","FM Depth"],["cutoff","Cutoff"],
+  ["env1_decay","Env1 Decay"],["env2_decay","Env2 Decay"],["filt_drive","Filt Drive"],["fold_amt","Fold Amt"],["fold_bias","Fold Bias"],
+];
+[1, 2].forEach((n) => {
+  panelRows.appendChild(buildSection("LFO " + n, null, (stack) => {
+    const top = row(), bot = row();
+    top.appendChild(col([ makeSegSwitch("lfo" + n + "_shape", "Shape", ["Saw","Tri","Sine","Sqr","S&H"], 2) ]));
+    top.appendChild(col([ makeKnob({ size:"small", key:"lfo" + n + "_rate", cap:"Rate", min:0, max:100, def:40 }) ]));
+    top.appendChild(col([ makeSegSwitch("lfo" + n + "_sync", "Mode", ["Free","Sync"], 0) ]));
+    top.appendChild(col([ makeSegSwitch("lfo" + n + "_div", "Sync Div", ["1/16","1/8","1/4","1/2","1","2","4","8"], 2) ]));
+    top.appendChild(col([ makeToggle({ key:"lfo" + n + "_retrig", cap:"Retrig", def:false }) ]));
+    LFO_DESTS.forEach(([k, lab]) => bot.appendChild(col([ makeKnob({ size:"small", key:"lfo" + n + "_" + k, cap:lab, bipolar:true, min:-100, max:100, def:0 }) ])));
+    stack.appendChild(top); stack.appendChild(bot);
+  }));
+});
 
 /* ---- Randomise strip ---- */
 const rndStrip = document.getElementById("rndStrip");

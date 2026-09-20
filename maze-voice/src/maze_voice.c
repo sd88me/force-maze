@@ -79,6 +79,7 @@
 #define _GNU_SOURCE          /* strtok_r under a strict -std=cNN build */
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -105,7 +106,9 @@
 #define BOSS_TONE_HZ    3800.0f    /* Boss passive tone stage corner */
 #define FILT_DRIVE_MAX  4.0f       /* extra small-signal gain at full Filt Drive */
 #define SVF_K_MAX       2.02f      /* damping at Resonance=0 (~Butterworth) */
-#define SVF_K_MIN       0.012f     /* damping at Resonance=100 (near self-osc) */
+#define SVF_RESO_NL     0.95f       /* 0..1 feedback saturation at max reso */
+#define RESO_BASS_COMP  0.7f       /* 1 = sqrt(Q) makeup (keeps some bass loss), 0 = full-Q */
+#define SVF_K_MIN       0.004f     /* damping at Resonance=100 (near self-osc) */
 
 /* v0.3.2 exponential control-curve endpoints */
 #define CUT_MIN_HZ      20.0f
@@ -227,10 +230,17 @@ static inline float svf_tick(svf_t* f, float x){
     float v3 = x - f->ic2;
     float v1 = a1 * f->ic1 + a2 * v3;
     float v2 = f->ic2 + a2 * f->ic1 + a3 * v3;
+    /* v1.4.0: nonlinear resonance. Saturate the band-pass term that carries
+     * the resonant feedback (more so as k falls), then rebuild v2 from it, so
+     * the peak blooms/squeals and self-oscillation limits into a driven sine
+     * instead of ringing linearly. Low resonance stays clean (nl -> 0). */
+    float nl = SVF_RESO_NL * (1.0f - clampf(f->k / SVF_K_MAX, 0.0f, 1.0f));
+    v1 += nl * (fast_tanh(v1) - v1);
+    v2 = f->ic2 + f->g * v1;
     f->ic1 = fast_tanh(2.0f * v1 - f->ic1);
     f->ic2 = fast_tanh(2.0f * v2 - f->ic2);
 
-    float peakQ  = 1.0f / f->k;
+    float peakQ  = sqrtf(1.0f / f->k) * RESO_BASS_COMP + (1.0f - RESO_BASS_COMP) / f->k;
     float lpComp = 1.0f / (1.0f + (peakQ - 1.0f) * f->morph);
     return (1.0f - f->morph) * v2 * lpComp + f->morph * v1;
 }
@@ -258,6 +268,38 @@ static inline float env_run(env_t* e){
 /* ============================================================================
  *  Instance
  * ==========================================================================*/
+#ifdef MAZE_LFO
+/* ---- v2 (Force only): 2 LFOs x 9 fixed destinations. Compiled only when the
+ * build defines MAZE_LFO (force-maze/scripts/build.sh), so the Schwung copy of
+ * this file stays byte-identical and unchanged. See docs/V2-PLAN.md sec. 3. ---- */
+enum { LFO_D_VCO, LFO_D_MOD, LFO_D_FM, LFO_D_CUT, LFO_D_ENV1, LFO_D_ENV2,
+       LFO_D_DRIVE, LFO_D_FOLD, LFO_D_BIAS, LFO_NDEST };
+static const char* const LFO_DEST_KEY[LFO_NDEST] = {
+    "vco_pitch","mod_pitch","fm_depth","cutoff","env1_decay","env2_decay",
+    "filt_drive","fold_amt","fold_bias" };
+/* sync divisions, in beats per cycle: 1/16 1/8 1/4 1/2 1bar 2bars 4bars 8bars */
+static const float LFO_DIV_BEATS[8] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f };
+typedef struct {
+    int   shape;    /* 0 saw, 1 tri, 2 sine, 3 square, 4 S&H */
+    float rate;     /* 0..1 knob -> 0.02..30 Hz (log), free-run */
+    int   sync, div, retrig;
+    float depth[LFO_NDEST];   /* -1..1 */
+    double phase;
+    float  sh;      /* held S&H value */
+    float  val;     /* current output, -1..1 */
+} lfo_t;
+static inline float lfo_wave(const lfo_t* l){
+    float p = (float)l->phase;
+    switch (l->shape){
+    case 0:  return 2.0f * p - 1.0f;
+    case 1:  return 4.0f * fabsf(p - 0.5f) - 1.0f;
+    case 2:  return sinf(TWO_PI * p);
+    case 3:  return p < 0.5f ? 1.0f : -1.0f;
+    default: return l->sh;
+    }
+}
+#endif
+
 typedef struct {
     double phase1, phaseMod;
     float  err1, errMod;
@@ -277,6 +319,7 @@ typedef struct {
     float  drift1, driftMod;
     float  note, vel;
     float  fsInternal;
+    int    outMode;   /* 0 internal voice, 1 external voice (post-fold VCO mix) */
 
     /* internal-domain params */
     float vcoTune;   /* semitones -24..24 */
@@ -305,6 +348,11 @@ typedef struct {
     float sCutoff, sReso, sFilterMode, sFiltDrive; /* v1.3.0 */
 
     char  err[96];
+#ifdef MAZE_LFO
+    lfo_t lfo[2];
+    float lfoBpm;        /* tempo for synced LFOs (host sets it from MIDI clock when present) */
+    int   lfoEnvTouched; /* an env decay was last set from a modulated value */
+#endif
 } maze_t;
 
 static const void* g_host = NULL;
@@ -393,6 +441,10 @@ static void load_defaults(maze_t* v){
     v->rng  = 0x1234567u;
     v->fsInternal = SAMPLE_RATE * (float)OVERSAMPLE;
     v->note = 45.0f; v->vel = 1.0f;
+#ifdef MAZE_LFO
+    for (int n = 0; n < 2; ++n){ memset(&v->lfo[n], 0, sizeof(lfo_t)); v->lfo[n].shape = 2; v->lfo[n].rate = 0.4f; v->lfo[n].div = 2; }
+    v->lfoBpm = 120.0f;
+#endif
 
     v->vcoTune=0.0f; v->modFreq=55.0f; v->fmDepth=0.0f; v->fmEg1=0.0f;
     v->vcoEg1=0.0f; v->vcoKey=1.0f; v->modEg1=0.0f; v->modKey=1.0f;
@@ -488,6 +540,9 @@ static void on_midi(void* instance, const uint8_t* msg, int len, int source){
         v->vel  = 0.2f + 0.8f * (d2 / 127.0f);
         env_trig(&v->eg1);
         env_trig(&v->eg2);
+#ifdef MAZE_LFO
+        for (int n = 0; n < 2; ++n) if (v->lfo[n].retrig){ v->lfo[n].phase = 0.0; v->lfo[n].sh = frand(&v->rng); }
+#endif
     } else if (st == 0x80 || (st == 0x90 && d2 == 0)){
         /* decay-only EGs: note-off is a no-op */
     }
@@ -527,6 +582,36 @@ static void set_param(void* instance, const char* key, const char* val){
         return;
     }
 
+#ifdef MAZE_LFO
+    if (!strcmp(key,"lfo_bpm")){ v->lfoBpm = clampf((float)atof(val), 20.0f, 300.0f); return; }
+    if (!strncmp(key,"lfo",3) && (key[3]=='1' || key[3]=='2') && key[4]=='_'){
+        lfo_t* l = &v->lfo[key[3]-'1']; const char* k = key + 5;
+        float lf = (float)atof(val);
+        if      (!strcmp(k,"shape")){
+            l->shape = (val[0]>='A') ? (!strncasecmp(val,"SAW",3)?0 : !strncasecmp(val,"TRI",3)?1 : !strncasecmp(val,"SIN",3)?2 : !strncasecmp(val,"SQ",2)?3 : 4)
+                                     : (int)clampf(lf,0,4);
+        }
+        else if (!strcmp(k,"rate"))   l->rate   = clampf(lf/100.0f,0,1);
+        else if (!strcmp(k,"sync"))   l->sync   = (!strcasecmp(val,"SYNC")||!strcmp(val,"1")||!strcasecmp(val,"on")) ? 1 : 0;
+        else if (!strcmp(k,"div")){
+            static const char* const dn[8] = {"16TH","8TH","4TH","HALF","1BAR","2BAR","4BAR","8BAR"};
+            int di = -1; for (int q = 0; q < 8; ++q) if (!strcasecmp(val, dn[q])) di = q;
+            l->div = (di >= 0) ? di : (int)clampf(lf,0,7);
+        }
+        else if (!strcmp(k,"retrig")) l->retrig = (!strcmp(val,"1")||!strcasecmp(val,"on")) ? 1 : 0;
+        else for (int d = 0; d < LFO_NDEST; ++d) if (!strcmp(k, LFO_DEST_KEY[d])) l->depth[d] = clampf(lf/100.0f,-1,1);
+        return;
+    }
+#endif
+    /* The Force shadow GUI (no int_values in its conf) sends an enum's option
+     * LABEL, not its index; accept both so those taps latch. */
+    if (!strcmp(key,"out_mode") && val[0]>='A'){
+        v->outMode = (val[0]=='E' || val[0]=='e'); return;
+    }
+    if (!strcmp(key,"route") && val[0]>='A'){
+        v->route = (!strncmp(val,"VCW",3)) ? 0 : (!strncmp(val,"VCF",3)) ? 2 : 1; return;
+    }
+
     float f = (float)atof(val);
     if      (!strcmp(key,"vco_tune"))   v->vcoTune  = f;
     else if (!strcmp(key,"mod_freq"))   v->modFreq  = f;
@@ -540,6 +625,7 @@ static void set_param(void* instance, const char* key, const char* val){
     else if (!strcmp(key,"fold_drive")) v->foldDrive= f/100.0f;
     else if (!strcmp(key,"fold_bias"))  v->foldBias = f/100.0f;
     else if (!strcmp(key,"route"))      v->route    = (int)clampf(f,0,2);
+    else if (!strcmp(key,"out_mode"))   v->outMode  = (int)clampf(f,0,1);
     else if (!strcmp(key,"fold_eg1"))   v->foldEg1  = f/100.0f;
     else if (!strcmp(key,"fold_key"))   v->foldKey  = f/100.0f;
     else if (!strcmp(key,"blend"))      v->blend    = f/100.0f;
@@ -566,13 +652,13 @@ static int build_state(maze_t* v, char* buf, int len){
       "fold_drive=%.4g,fold_bias=%.4g,route=%d,fold_eg1=%.4g,fold_key=%.4g,blend=%.4g,"
       "cutoff=%.4g,reso=%.4g,filter_mode=%.4g,env1_decay=%.4g,cutoff_eg1=%.4g,cutoff_key=%.4g,filt_drive=%.4g,"
       "vco_lvl=%.4g,mod_lvl=%.4g,noise_lvl=%.4g,noise_tone=%.4g,ring_lvl=%.4g,sat=%.4g,level=%.4g,"
-      "vco_key=%.4g,mod_key=%.4g,"
+      "vco_key=%.4g,mod_key=%.4g,out_mode=%d,"
       "rnd_voice=%d,rnd_wavefolder=%d,rnd_filter=%d,rnd_tone=%d",
       v->vcoTune, v->modFreq, v->fmDepth*100, v->fmEg1*100, v->vcoEg1*100, v->modEg1*100, v->env2Decay*100,
       v->foldDrive*100, v->foldBias*100, v->route, v->foldEg1*100, v->foldKey*100, v->blend*100,
       v->cutoff*100, v->reso*100, v->filterMode*100, v->env1Decay*100, v->cutoffEg1*100, v->cutoffKey*100, v->filtDrive*100,
       v->vcoLvl*100, v->modLvl*100, v->noiseLvl*100, v->noiseTone*100, v->ringLvl*100, v->sat*100, v->level*100,
-      v->vcoKey*100, v->modKey*100,
+      v->vcoKey*100, v->modKey*100, v->outMode,
       v->rndVoice, v->rndWavefolder, v->rndFilter, v->rndTone);
 }
 
@@ -592,6 +678,19 @@ static int get_param(void* instance, const char* key, char* buf, int buf_len){
 
     if (!strcmp(key,"state")) return build_state(v, buf, buf_len);
 
+#ifdef MAZE_LFO
+    if (!strcmp(key,"lfo_bpm")) return snprintf(buf, buf_len, "%.1f", v->lfoBpm);
+    if (!strncmp(key,"lfo",3) && (key[3]=='1' || key[3]=='2') && key[4]=='_'){
+        const lfo_t* l = &v->lfo[key[3]-'1']; const char* k = key + 5;
+        if (!strcmp(k,"shape"))  return snprintf(buf, buf_len, "%d", l->shape);
+        if (!strcmp(k,"rate"))   return snprintf(buf, buf_len, "%.4g", l->rate*100.0f);
+        if (!strcmp(k,"sync"))   return snprintf(buf, buf_len, "%d", l->sync);
+        if (!strcmp(k,"div"))    return snprintf(buf, buf_len, "%d", l->div);
+        if (!strcmp(k,"retrig")) return snprintf(buf, buf_len, "%d", l->retrig);
+        for (int d = 0; d < LFO_NDEST; ++d) if (!strcmp(k, LFO_DEST_KEY[d])) return snprintf(buf, buf_len, "%.4g", l->depth[d]*100.0f);
+        return -1;
+    }
+#endif
     /* v0.3.4 randomise page reads */
     if (!strcmp(key,"rnd_voice"))      return snprintf(buf, buf_len, "%d", v->rndVoice);
     if (!strcmp(key,"rnd_wavefolder")) return snprintf(buf, buf_len, "%d", v->rndWavefolder);
@@ -612,6 +711,7 @@ static int get_param(void* instance, const char* key, char* buf, int buf_len){
     else if (!strcmp(key,"fold_drive")) f = v->foldDrive*100.0f;
     else if (!strcmp(key,"fold_bias"))  f = v->foldBias*100.0f;
     else if (!strcmp(key,"route"))      f = (float)v->route;
+    else if (!strcmp(key,"out_mode"))   f = (float)v->outMode;
     else if (!strcmp(key,"fold_eg1"))   f = v->foldEg1*100.0f;
     else if (!strcmp(key,"fold_key"))   f = v->foldKey*100.0f;
     else if (!strcmp(key,"blend"))      f = v->blend*100.0f;
@@ -651,6 +751,7 @@ typedef struct {
     float foldBias, blend, amp, level;
     float filtDrive;
     int   route;
+    int   ext;
 } ctrl_t;
 
 static inline float voice_tick(maze_t* v, const ctrl_t* c, float foldGain){
@@ -685,7 +786,10 @@ static inline float voice_tick(maze_t* v, const ctrl_t* c, float foldGain){
     float core = premix + ring * c->gRing;
 
     float folded, filtered;
-    if (c->route == 1){
+    if (c->ext){
+        folded   = wavefold(foldGain * core + c->foldBias);
+        filtered = 0.0f;   /* filter bypassed: raw VCO mix -> folder only */
+    } else if (c->route == 1){
         folded   = wavefold(foldGain * core + c->foldBias);
         filtered = svf_tick(&v->svf, filt_drive_shape(core, c->filtDrive));
     } else if (c->route == 0){
@@ -699,6 +803,8 @@ static inline float voice_tick(maze_t* v, const ctrl_t* c, float foldGain){
 
     float blendPos = 0.5f + 0.5f * c->blend;
     float mix = (1.0f - blendPos) * folded + blendPos * filtered;
+
+    if (c->ext) return folded * c->level;   /* EXTERNAL VOICE: raw post-fold VCO mix, ungated */
 
     float outp = sat_process(&v->satOut, 1.1f * mix);
     outp = dcblock(&v->dcOut, outp);
@@ -781,19 +887,72 @@ static void render_block(void* instance, int16_t* out_lr, int frames){
     c.level = v->sLevel;
     c.filtDrive = v->sFiltDrive;
     c.route = v->route;
+    c.ext = v->outMode;
 
     float foldKeyTerm = v->foldKey * ((v->note - 60.0f) / 24.0f);
+
+#ifdef MAZE_LFO
+    /* Advance both LFOs one block; per-sample modulation is a linear ramp from
+     * the value at block start to the value at block end (no 344 Hz zipper). */
+    float lv0[2], lv1[2]; int lfoOn = 0;
+    float mBase[LFO_NDEST] = {0}, mEnd[LFO_NDEST] = {0};
+    for (int n = 0; n < 2; ++n){
+        lfo_t* l = &v->lfo[n];
+        float hz = l->sync ? (v->lfoBpm / 60.0f) / LFO_DIV_BEATS[l->div]
+                           : 0.02f * powf(1500.0f, l->rate);
+        lv0[n] = l->val;
+        l->phase += (double)hz * frames / SAMPLE_RATE;
+        if (l->phase >= 1.0){ l->phase -= floorf((float)l->phase); if (l->phase >= 1.0) l->phase = 0.0; l->sh = frand(&v->rng); }
+        l->val = lfo_wave(l);
+        lv1[n] = l->val;
+        for (int d = 0; d < LFO_NDEST; ++d){
+            if (l->depth[d] != 0.0f) lfoOn = 1;
+            mBase[d] += lv0[n] * l->depth[d];
+            mEnd[d]  += lv1[n] * l->depth[d];
+        }
+    }
+    /* env decays: block-rate (expf per sample would be wasteful) */
+    if (lfoOn || v->lfoEnvTouched){
+        float m1 = 0.5f * mEnd[LFO_D_ENV1], m2 = 0.5f * mEnd[LFO_D_ENV2];
+        env_set(&v->eg1, decay_sec(clampf(v->env1Decay + m1, 0.0f, 1.0f)), SAMPLE_RATE);
+        env_set(&v->eg2, decay_sec(clampf(v->env2Decay + m2, 0.0f, 1.0f)), SAMPLE_RATE);
+        v->lfoEnvTouched = (m1 != 0.0f || m2 != 0.0f);
+    }
+    const float invF = 1.0f / (float)frames;
+#endif
 
     for (int i = 0; i < frames; ++i){
         float e1 = env_run(&v->eg1);
         float e2 = env_run(&v->eg2);
         c.amp = e2 * v->vel;
 
+#ifdef MAZE_LFO
+        float m[LFO_NDEST];
+        if (lfoOn){
+            float t = (float)(i + 1) * invF;
+            for (int d = 0; d < LFO_NDEST; ++d) m[d] = mBase[d] + (mEnd[d] - mBase[d]) * t;
+            c.f1   = clampf(f1   * exp2f(m[LFO_D_VCO]), 1.0f,  0.45f * v->fsInternal);
+            c.fMod = clampf(fMod * exp2f(m[LFO_D_MOD]), 0.05f, 0.45f * v->fsInternal);
+            c.fmIndex   = clampf(v->sFmDepth + v->fmEg1 * eg1b + m[LFO_D_FM], 0.0f, 1.0f) * FM_MAX;
+            c.filtDrive = clampf(v->sFiltDrive + m[LFO_D_DRIVE], 0.0f, 1.0f);
+            c.foldBias  = clampf(v->sFoldBias  + m[LFO_D_BIAS],  -1.0f, 1.0f);
+        } else {
+            for (int d = 0; d < LFO_NDEST; ++d) m[d] = 0.0f;
+        }
+#endif
+
         float cutEnv = v->cutoffEg1 * e1 * EG_CUT_OCT;
+#ifdef MAZE_LFO
+        cutEnv += 3.0f * m[LFO_D_CUT];
+#endif
         float cutHz  = cutoff_hz(v->sCutoff) * powf(2.0f, cutBaseSemis/12.0f) * powf(2.0f, cutEnv);
         svf_set(&v->svf, cutHz, kDamp, v->sFilterMode, v->fsInternal);
 
-        float foldAmt = clampf(v->sFoldDrive + v->foldEg1 * e1 + foldKeyTerm, 0.0f, 1.0f);
+        float foldAmt = v->sFoldDrive + v->foldEg1 * e1 + foldKeyTerm;
+#ifdef MAZE_LFO
+        foldAmt += m[LFO_D_FOLD];
+#endif
+        foldAmt = clampf(foldAmt, 0.0f, 1.0f);
         float foldGain = 1.0f + foldAmt * 7.0f;
 
         float s;

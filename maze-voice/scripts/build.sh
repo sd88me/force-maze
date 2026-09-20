@@ -28,7 +28,7 @@ docker run --rm --platform "$PLATFORM" \
 
   # DSP core — C, upstream logic untouched (no LABYRINTH_STANDALONE defined,
   # so its PC-only main() is compiled out and does not collide with ours)
-  gcc $COMMON -std=c11   -c src/maze_voice.c        -o obj/maze_voice.o
+  gcc $COMMON -DMAZE_LFO=1 -std=c11   -c src/maze_voice.c        -o obj/maze_voice.o
 
   # vendored RtMidi (ALSA backend) + our host shim — C++
   g++ $COMMON -std=c++14 -D__LINUX_ALSA__ -c src/rtmidi/RtMidi.cpp -o obj/RtMidi.o
