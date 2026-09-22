@@ -53,6 +53,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sched.h>
+#include <time.h>
 
 #define NUM_STEPS   8
 
@@ -115,6 +116,43 @@ static inline int reset_idx_from_bars(int bars){
 
 #define MAX_SPREAD 64   /* ==>> EDIT ME: semitone spread each side of root */
 
+#ifdef MAZE_LFO
+/* ---- FORCE-ONLY: 2 LFOs x 8 fixed destinations, mirroring maze-voice's own
+ * MAZE_LFO block (src/maze_voice.c). Compiled only when the build defines
+ * MAZE_LFO (force-maze/scripts/build.sh), so a byte-for-byte diff against
+ * schwung-maze's maze_seq.c stays possible. There's no per-sample audio path
+ * here (this is a MIDI-only sequencer - see maze_render_block below), so the
+ * LFOs are advanced once per incoming MIDI clock pulse (0xF8, 24 ppqn)
+ * instead of once per audio block; tempo for "Sync" mode is estimated from
+ * the wall-clock gap between clock pulses (see lfo_advance()). ---- */
+enum { LFO_D_CORRUPT1, LFO_D_RANGE1, LFO_D_LENGTH1, LFO_D_TRIGMIX,
+       LFO_D_CORRUPT2, LFO_D_RANGE2, LFO_D_LENGTH2, LFO_D_NOTELEN, LFO_NDEST };
+static const char* const LFO_DEST_KEY[LFO_NDEST] = {
+    "corrupt1","range1","length1","trigmix","corrupt2","range2","length2","notelen" };
+/* sync divisions, in beats per cycle: 1/16 1/8 1/4 1/2 1bar 2bars 4bars 8bars */
+static const float LFO_DIV_BEATS[8] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f };
+typedef struct {
+    int   shape;    /* 0 saw, 1 tri, 2 sine, 3 square, 4 S&H */
+    float rate;     /* 0..1 knob -> 0.02..30 Hz (log), free-run */
+    int   sync, div, retrig;
+    float depth[LFO_NDEST];   /* -1..1 */
+    double phase;
+    float  sh;      /* held S&H value */
+    float  val;     /* current output, -1..1 */
+} lfo_t;
+static inline float clampf(float v, float lo, float hi){ return v<lo?lo:(v>hi?hi:v); }
+static inline float lfo_wave(const lfo_t* l){
+    float p = (float)l->phase;
+    switch (l->shape){
+    case 0:  return 2.0f * p - 1.0f;
+    case 1:  return 4.0f * fabsf(p - 0.5f) - 1.0f;
+    case 2:  return sinf(2.0f * (float)M_PI * p);
+    case 3:  return p < 0.5f ? 1.0f : -1.0f;
+    default: return l->sh;
+    }
+}
+#endif
+
 typedef struct {
     int   bit[NUM_STEPS];
     float cv [NUM_STEPS];
@@ -133,6 +171,12 @@ typedef struct {
     int   running, suspended;
     long  pulse;
 
+#ifdef MAZE_LFO
+    lfo_t  lfo[2];
+    float  lfoBpm;         /* estimated from the incoming MIDI clock gap */
+    double lfoLastPulseT;  /* wall-clock time of the previous 0xF8, 0 = none yet */
+#endif
+
     /* background state saver */
     pthread_t       state_thread;
     int             state_thread_started;
@@ -147,8 +191,8 @@ static void seq_randomize(seq_t *q){
     q->length=NUM_STEPS; q->play=-1;
     for (int i=0;i<NUM_STEPS;i++){ q->bit[i]=(rng_f()<0.5f)?1:0; q->cv[i]=rng_bip(); }
 }
-static void seq_corrupt(seq_t *q, int idx){
-    float c=q->corrupt/100.0f;
+static void seq_corrupt(seq_t *q, int idx, int corrupt){
+    float c=corrupt/100.0f;
     float p_cv =(c<=0.5f)?(c*0.5f):(0.25f+(c-0.5f)*0.5f);
     float p_bit=(c<=0.5f)?0.0f:((c-0.5f));
     if (rng_f()<p_cv) q->cv[idx]=rng_bip();
@@ -195,9 +239,9 @@ static void seq_note_off(maze_t *L, seq_t *q){
 }
 static void all_notes_off(maze_t *L){ seq_note_off(L,&L->s[0]); seq_note_off(L,&L->s[1]); }
 
-static void step_seq(maze_t *L, int which, int vel){
+static void step_seq(maze_t *L, int which, int vel, int corrupt, int cv_range, int length, int gate){
     seq_t *q=&L->s[which];
-    int n=q->length<1?1:q->length;
+    int n=length<1?1:length;
     /* Sequence Reset: every reset_bars bars, snap the play head back to step 1.
        steps/bar = 96/RATE_PULSES at the current note rate. */
     if (q->reset_bars>0){
@@ -206,13 +250,13 @@ static void step_seq(maze_t *L, int which, int vel){
     }
     q->play=(q->play+1)%n;
     q->reset_ctr++;
-    seq_corrupt(q,q->play);
+    seq_corrupt(q,q->play,corrupt);
     if (q->bit[q->play] && vel>0){
         seq_note_off(L,q);
-        int note=quantize_note(L,q->cv[q->play],q->cv_range);
+        int note=quantize_note(L,q->cv[q->play],cv_range);
         send_midi(L,0x90|(q->channel&0x0F),note&0x7F,vel&0x7F);
         q->last_note=note; q->last_ch=q->channel; q->note_active=1;
-        q->off_pulse=L->pulse+(long)lrintf(GATE_STEPS[L->gate]*RATE_PULSES[L->rate]);
+        q->off_pulse=L->pulse+(long)lrintf(GATE_STEPS[gate]*RATE_PULSES[L->rate]);
         if (q->off_pulse<=L->pulse) q->off_pulse=L->pulse+1;
     }
 }
@@ -228,6 +272,34 @@ static void set_root_from_key(maze_t *L){
     int r=60+(L->key%12)+L->transpose+L->pad_semis;
     if(r<0)r=0; if(r>127)r=127; L->root=r;
 }
+
+#ifdef MAZE_LFO
+/* Advance both LFOs by one MIDI-clock pulse and accumulate each destination's
+ * signed offset (sum over both LFOs of val * depth, still -1..1-ish) into
+ * off[]. Called once per 0xF8, whether or not this pulse lands on a step. */
+static void lfo_advance(maze_t *L, float off[LFO_NDEST]){
+    for (int d=0; d<LFO_NDEST; ++d) off[d]=0.0f;
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    double now = (double)ts.tv_sec + (double)ts.tv_nsec*1e-9;
+    double dt = 60.0/(120.0*24.0); /* nominal fallback: 120bpm, 24ppqn */
+    if (L->lfoLastPulseT > 0.0){
+        double gap = now - L->lfoLastPulseT;
+        if (gap > 0.0005 && gap < 2.0){
+            dt = gap;
+            L->lfoBpm = clampf((float)(60.0/(gap*24.0)), 20.0f, 300.0f);
+        }
+    }
+    L->lfoLastPulseT = now;
+    for (int n=0; n<2; ++n){
+        lfo_t *l=&L->lfo[n];
+        float hz = l->sync ? (L->lfoBpm/60.0f)/LFO_DIV_BEATS[l->div] : 0.02f*powf(1500.0f,l->rate);
+        l->phase += (double)hz*dt;
+        if (l->phase >= 1.0){ l->phase -= floorf((float)l->phase); if(l->phase>=1.0) l->phase=0.0; l->sh=rng_bip(); }
+        l->val = lfo_wave(l);
+        for (int d=0; d<LFO_NDEST; ++d) off[d] += l->val*l->depth[d];
+    }
+}
+#endif
 
 /* ---- persistence (runs on the WORKER thread, never the audio callback) ---- */
 /* FORCE-ONLY: derive the directory from g_state_path instead of the old
@@ -355,6 +427,11 @@ static void *maze_create(const char *module_dir, const char *json_defaults){
     L->s[1].cv_range=20; L->s[1].channel=0;   /* ==>> EDIT ME: default Seq2 ch */
     L->s[0].reset_bars=0; L->s[1].reset_bars=0; /* default: off (never reset) */
 
+#ifdef MAZE_LFO
+    for (int n=0;n<2;++n){ memset(&L->lfo[n],0,sizeof(lfo_t)); L->lfo[n].shape=2; L->lfo[n].rate=0.4f; L->lfo[n].div=2; }
+    L->lfoBpm=120.0f; L->lfoLastPulseT=0.0;
+#endif
+
     pthread_mutex_init(&L->state_mutex, NULL);
     maze_load_state(L);                        /* one-time load (like tb3po) */
 
@@ -390,9 +467,28 @@ static void maze_on_midi(void *inst, const uint8_t *msg, int len, int source){
         if(!L->running) return;
         L->pulse++;
         flush_offs(L);
+#ifdef MAZE_LFO
+        float lfoOff[LFO_NDEST];
+        lfo_advance(L,lfoOff);
+#endif
         if (L->pulse % RATE_PULSES[L->rate] == 0){
-            int v1,v2; trig_velocities(L->trig_mix,&v1,&v2);
-            step_seq(L,0,v1); step_seq(L,1,v2);
+            int trigMix=L->trig_mix;
+            int corrupt1=L->s[0].corrupt, range1=L->s[0].cv_range, length1=L->s[0].length;
+            int corrupt2=L->s[1].corrupt, range2=L->s[1].cv_range, length2=L->s[1].length;
+            int gate=L->gate;
+#ifdef MAZE_LFO
+            trigMix  = (int)lrintf(clampf((float)trigMix  + lfoOff[LFO_D_TRIGMIX]*63.0f, -63.0f, 64.0f));
+            corrupt1 = (int)lrintf(clampf((float)corrupt1 + lfoOff[LFO_D_CORRUPT1]*50.0f, 0.0f, 100.0f));
+            range1   = (int)lrintf(clampf((float)range1   + lfoOff[LFO_D_RANGE1]*50.0f, 0.0f, 100.0f));
+            length1  = (int)lrintf(clampf((float)length1  + lfoOff[LFO_D_LENGTH1]*3.5f, 1.0f, 8.0f));
+            corrupt2 = (int)lrintf(clampf((float)corrupt2 + lfoOff[LFO_D_CORRUPT2]*50.0f, 0.0f, 100.0f));
+            range2   = (int)lrintf(clampf((float)range2   + lfoOff[LFO_D_RANGE2]*50.0f, 0.0f, 100.0f));
+            length2  = (int)lrintf(clampf((float)length2  + lfoOff[LFO_D_LENGTH2]*3.5f, 1.0f, 8.0f));
+            gate     = (int)lrintf(clampf((float)gate      + lfoOff[LFO_D_NOTELEN]*3.5f, 0.0f, 7.0f));
+#endif
+            int v1,v2; trig_velocities(trigMix,&v1,&v2);
+            step_seq(L,0,v1,corrupt1,range1,length1,gate);
+            step_seq(L,1,v2,corrupt2,range2,length2,gate);
         }
         return;
     }
@@ -430,6 +526,18 @@ static void maze_set_param(void *inst, const char *key, const char *val){
     else if (!strcmp(key,"panic")){ all_notes_off(L); }
     /* RT-safe save: just mark dirty; the worker thread does the file I/O. */
     else if (!strcmp(key,"save")){ L->state_dirty=1; }
+#ifdef MAZE_LFO
+    else if (!strncmp(key,"lfo",3) && (key[3]=='1'||key[3]=='2') && key[4]=='_'){
+        lfo_t *l=&L->lfo[key[3]-'1']; const char *k=key+5;
+        float lf=(float)v;
+        if      (!strcmp(k,"shape"))  l->shape=(int)clampf(lf,0,4);
+        else if (!strcmp(k,"rate"))   l->rate=clampf(lf/100.0f,0,1);
+        else if (!strcmp(k,"sync"))   l->sync=(v!=0);
+        else if (!strcmp(k,"div"))    l->div=(int)clampf(lf,0,7);
+        else if (!strcmp(k,"retrig")) l->retrig=(v!=0);
+        else for (int d=0; d<LFO_NDEST; ++d) if (!strcmp(k,LFO_DEST_KEY[d])) l->depth[d]=clampf(lf/100.0f,-1,1);
+    }
+#endif
 }
 
 /* Remote UI (Tool tab) contract, see docs/MODULES.md "Remote UI for overtake
@@ -475,6 +583,21 @@ static int maze_get_param(void *inst, const char *key, char *buf, int buf_len){
     if (!strcmp(key,"running")) n=snprintf(buf,buf_len,"%d",L->running?1:0);
     else if (!strcmp(key,"module_id")) n=snprintf(buf,buf_len,"maze_seq");
     else if (!strcmp(key,"state")) return build_state_json(L,buf,buf_len);
+#ifdef MAZE_LFO
+    else if (!strncmp(key,"lfo",3) && (key[3]=='1'||key[3]=='2') && key[4]=='_'){
+        const lfo_t *l=&L->lfo[key[3]-'1']; const char *k=key+5;
+        if (!strcmp(k,"shape"))  n=snprintf(buf,buf_len,"%d",l->shape);
+        else if (!strcmp(k,"rate"))   n=snprintf(buf,buf_len,"%.4g",l->rate*100.0f);
+        else if (!strcmp(k,"sync"))   n=snprintf(buf,buf_len,"%d",l->sync);
+        else if (!strcmp(k,"div"))    n=snprintf(buf,buf_len,"%d",l->div);
+        else if (!strcmp(k,"retrig")) n=snprintf(buf,buf_len,"%d",l->retrig);
+        else {
+            int found=0;
+            for (int d=0; d<LFO_NDEST; ++d) if (!strcmp(k,LFO_DEST_KEY[d])){ n=snprintf(buf,buf_len,"%.4g",l->depth[d]*100.0f); found=1; break; }
+            if (!found) return -1;
+        }
+    }
+#endif
     else if (!strcmp(key,"s1_state")||!strcmp(key,"s2_state")){
         seq_t *q=&L->s[key[1]=='2'?1:0];
         int off=snprintf(buf,buf_len,"%d|",q->length);

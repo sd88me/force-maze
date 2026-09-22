@@ -468,6 +468,35 @@ panelRows.appendChild(buildSection("Global", (stack) => {
   stack.appendChild(r);
 }));
 
+/* ---- LFO: two free-run/synced LFOs, each modulating all eight sequencer
+ * destinations (Corrupt/Range/Length per sequencer, Trig Mix, Note Length).
+ * Mirrors maze-voice's own LFO section (web/index.html) but wired to
+ * maze_seq_core.c's lfo1_*/lfo2_* set_param keys (see MAZE_LFO block there),
+ * using dropdowns for the enum controls to match this page's existing style
+ * (no toggle/segmented-switch widgets here, unlike maze-voice's panel). ---- */
+const LFO_SHAPE_OPTS = ["Saw","Tri","Sine","Sqr","S&H"];
+const LFO_MODE_OPTS = ["Free","Sync"];
+const LFO_DIV_OPTS = ["1/16","1/8","1/4","1/2","1 bar","2 bar","4 bar","8 bar"];
+const LFO_ONOFF_OPTS = ["Off","On"];
+const LFO_DESTS = [
+  ["corrupt1","Corrupt 1"], ["range1","Range 1"], ["length1","Length 1"],
+  ["trigmix","Trig Mix"],
+  ["corrupt2","Corrupt 2"], ["range2","Range 2"], ["length2","Length 2"],
+  ["notelen","Note Len"],
+];
+[1, 2].forEach((n) => {
+  panelRows.appendChild(buildSection("LFO " + n, (stack) => {
+    const top = row(), bot = row();
+    top.appendChild(col([ makeDropdown({ key:"lfo" + n + "_shape", cap:"Shape", options:LFO_SHAPE_OPTS, def:2 }) ]));
+    top.appendChild(col([ makeKnob({ size:"small", key:"lfo" + n + "_rate", cap:"Rate", min:0, max:100, def:40 }) ]));
+    top.appendChild(col([ makeDropdown({ key:"lfo" + n + "_sync", cap:"Mode", options:LFO_MODE_OPTS, def:0 }) ]));
+    top.appendChild(col([ makeDropdown({ key:"lfo" + n + "_div", cap:"Sync Div", options:LFO_DIV_OPTS, def:2 }) ]));
+    top.appendChild(col([ makeDropdown({ key:"lfo" + n + "_retrig", cap:"Retrig", options:LFO_ONOFF_OPTS, def:0 }) ]));
+    LFO_DESTS.forEach(([k, lab]) => bot.appendChild(col([ makeKnob({ size:"small", key:"lfo" + n + "_" + k, cap:lab, bipolar:true, min:-100, max:100, def:0 }) ])));
+    stack.appendChild(top); stack.appendChild(bot);
+  }));
+});
+
 /* ---------------------------------------------------------------------
  * Live sync — no server push on the Force (unlike Move's manager, which
  * drove this via onParamChange from its own adaptive server-side poll), so

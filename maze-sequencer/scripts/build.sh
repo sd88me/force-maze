@@ -24,7 +24,7 @@ docker run --rm --platform "$PLATFORM" \
 
   # sequencer core — C, upstream logic untouched but for the FORCE-ONLY
   # header swap + state-path change (see src/maze_seq_core.c header)
-  gcc $COMMON -std=c11   -c src/maze_seq_core.c      -o obj/maze_seq_core.o
+  gcc $COMMON -DMAZE_LFO=1 -std=c11   -c src/maze_seq_core.c      -o obj/maze_seq_core.o
 
   # vendored RtMidi (ALSA backend) + our host shim — C++
   g++ $COMMON -std=c++14 -D__LINUX_ALSA__ -c src/rtmidi/RtMidi.cpp -o obj/RtMidi.o
