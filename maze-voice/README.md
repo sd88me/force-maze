@@ -131,7 +131,7 @@ only the audio tap arms at boot, with zero voices attached; start
 
 A full editor page for the Force's own touchscreen, rendered by
 [`force-shadow`](https://github.com/sd88me/force-shadow): open it with
-`SHIFT+SCENE-3`. It's discovered automatically at force-shadow startup — no
+`SHIFT+SCENE-4`. It's discovered automatically at force-shadow startup — no
 rebuild needed to change it.
 
 | Tab | Contents |

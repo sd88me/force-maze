@@ -107,7 +107,7 @@ run unattended.
 
 A full editor page for the Force's own touchscreen, rendered by
 [`force-shadow`](https://github.com/sd88me/force-shadow): open it with
-`SHIFT+SCENE-4`, in the same palette as the web panel.
+`SHIFT+SCENE-5`, in the same palette as the web panel.
 
 | Tab | Contents |
 |-----|----------|
