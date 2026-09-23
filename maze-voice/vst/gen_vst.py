@@ -15,6 +15,8 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 NAME, VENDOR, UID, VERSION = "Maze Voice", "sd88me", "MzVc", 1000
 AKAI = "/usr/share/Akai/Content/Synths/"
@@ -255,7 +257,15 @@ def gen_images(d, images):
             im.save(os.path.join(d, "%s_%s.png" % (img, state)))
 
 
+def ppm_to_png(ppm, png):
+    from PIL import Image
+    Image.open(ppm).save(png)
+
+
 def gen_skin(params, outdir):
+    layout = os.path.join(ROOT, "layout.conf")
+    if os.path.exists(layout):   # Force Shadow style layout -> skin (shadow_skin.py)
+        return gen_skin_from_layout(params, outdir, layout)
     index = {p["key"]: i for i, p in enumerate(params)}
     bg = {"version": 1, "colour": "ff161618", "image": ""}
     comps, tabs, qmap = control_defs(), [], []
@@ -307,6 +317,38 @@ def gen_skin(params, outdir):
         json.dump(obj, open(os.path.join(d, "Plugin Skins", f), "w"), indent=4)
     gen_images(os.path.join(d, "Plugin Skins"), images)
     return d
+
+
+def write_skin_folder(outdir, tui, qlinks):
+    d = os.path.join(outdir, "%s - VST - %s" % (VENDOR, NAME))
+    os.makedirs(os.path.join(d, "Plugin Skins"), exist_ok=True)
+    open(os.path.join(d, "version.xml"), "w").write(
+        "<?xml version='1.0' encoding='utf-8'?>\n<plugincontent version=\"1.0\">\n"
+        "\t<identifier>%s.vst.%s</identifier>\n\t<version>1.0.0.0</version>\n</plugincontent>\n"
+        % (VENDOR, NAME.lower().replace(" ", "")))
+    for f, obj in (("TUI.json", tui), ("Q-Links.json", qlinks), ("Q-Links - 8by1.json", qlinks)):
+        json.dump(obj, open(os.path.join(d, "Plugin Skins", f), "w"), indent=4)
+    return d
+
+
+def gen_skin_from_layout(params, outdir, layout):
+    import shadow_skin
+    d = os.path.join(outdir, "%s - VST - %s" % (VENDOR, NAME), "Plugin Skins")
+    os.makedirs(d, exist_ok=True)
+    art = os.environ.get("SHADOW_ART", os.path.join(ROOT, "build", "shadow_art"))
+    comps, tabs, qmap = shadow_skin.build(layout, params, d, art, ppm_to_png)
+    tui = {"pageData": {
+        "version": 1,
+        "componentDefinitions": {"version": 2, "importFiles": [
+            AKAI + "Generic/Generic Knob Overlay.json",
+            AKAI + "Generic/Generic Menu Overlay.json"],
+            "localComponentDefinitions": comps},
+        "info": {"version": 1, "type": "CompleteDescription"},
+        "tabs": tabs}}
+    qlinks = {"version": 4, "info": {"version": 1, "type": "CompleteDescription"},
+              "Screen Mode Q-Links": {"version": 4, "map": qmap},
+              "Program Mode Q-Links": dict(qmap[0]["Q-Links"])}
+    return write_skin_folder(outdir, tui, qlinks)
 
 
 def main():

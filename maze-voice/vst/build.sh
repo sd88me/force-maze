@@ -6,6 +6,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Skin artwork is drawn by force-shadow's own renderer (layout.conf -> shadow_art).
+FORCE_SHADOW="${FORCE_SHADOW:-$PWD/../../force-shadow}"
+mkdir -p vst/build
+if [ -f vst/layout.conf ]; then
+  docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/w -v "$FORCE_SHADOW":/fs:ro -w /w gcc:12 \
+    gcc -O2 -I/fs/tools -o vst/build/shadow_art vst/shadow_art.c -lm
+fi
+
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD":/w -v /usr/share/fonts/truetype/dejavu:/fonts:ro -w /w python:3.11-slim sh -c "pip install -q --no-warn-script-location --target /tmp/p pillow >/dev/null 2>&1; PYTHONPATH=/tmp/p python3 vst/gen_vst.py"
 
 docker run --rm --platform linux/arm/v7 -u "$(id -u):$(id -g)" -v "$PWD":/b -w /b arm32v7/gcc:12 bash -euxc '
