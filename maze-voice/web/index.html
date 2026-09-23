@@ -371,34 +371,34 @@ function makeOrderSwitch() {
 }
 
 /* ---------------------------------------------------------------------
- * Output Mix channel switch - L / R / L+R routing into the Force's real
- * 2-channel capture tap (forceAudioInject.h: there is no 3rd channel to
- * route to, a voice lands on L, R, or both). Sends the label itself as the
- * wire value ("L"/"R"/"L+R") - maze_host's mix.channel handler expects
- * exactly these three strings, not a numeric index, unlike Order above.
+ * Output Mix destination switch - which force-audiojack ring this voice
+ * lands on: Audio-In 1/2 or Out 3/4, mono or stereo (forceAudioInject.h:
+ * a voice attaches to one bus at a time, L/R/both within it). Sends the
+ * label itself as the wire value - maze_host's mix.dest handler expects
+ * exactly one of these six strings, not a numeric index, unlike Order above.
  * ------------------------------------------------------------------- */
-const MIX_CHAN_OPTIONS = ["L", "R", "L+R"];
-function makeMixChanSwitch() {
+const MIX_DEST_OPTIONS = ["IN1", "IN2", "OUT3", "OUT4", "IN1,2", "OUT3,4"];
+function makeMixDestSwitch() {
   const wrap = document.createElement("div"); wrap.className = "order-wrap";
   const stage = document.createElement("div"); stage.className = "stage";
   const track = document.createElement("div"); track.className = "order-track";
   stage.appendChild(track);
   const topline = document.createElement("div"); topline.className = "topline";
   const val = document.createElement("div"); val.className = "kval";
-  const segs = MIX_CHAN_OPTIONS.map((label, i) => {
+  const segs = MIX_DEST_OPTIONS.map((label, i) => {
     const seg = document.createElement("div"); seg.className = "order-seg mix-chan-seg"; seg.title = label; seg.textContent = label;
     seg.addEventListener("click", () => commit(i));
     track.appendChild(seg);
     return seg;
   });
-  const cap = document.createElement("div"); cap.className = "cap-label"; cap.textContent = "Channel";
+  const cap = document.createElement("div"); cap.className = "cap-label"; cap.textContent = "Destination";
 
-  let idx = 2; /* default L+R, matching maze_host's shm_setup() default */
-  function render(i) { idx = i; segs.forEach((s, j) => s.classList.toggle("active", j === i)); val.textContent = MIX_CHAN_OPTIONS[i]; }
-  function commit(i) { render(i); schwungRemote.setParam("mix.channel", MIX_CHAN_OPTIONS[i]); }
+  let idx = 4; /* default IN1,2, matching maze_host's shm_setup() default */
+  function render(i) { idx = i; segs.forEach((s, j) => s.classList.toggle("active", j === i)); val.textContent = MIX_DEST_OPTIONS[i]; }
+  function commit(i) { render(i); schwungRemote.setParam("mix.dest", MIX_DEST_OPTIONS[i]); }
   render(idx);
 
-  registry["mix.channel"] = { set: (v) => { const i = MIX_CHAN_OPTIONS.indexOf(String(v).trim()); if (i >= 0) render(i); } };
+  registry["mix.dest"] = { set: (v) => { const i = MIX_DEST_OPTIONS.indexOf(String(v).trim()); if (i >= 0) render(i); } };
 
   wrap.appendChild(stage); wrap.appendChild(topline); wrap.appendChild(val); wrap.appendChild(cap);
   return wrap;
@@ -556,7 +556,7 @@ panelRows.appendChild(buildSection("Output Mix", null, (stack) => {
   const r = row();
   /* Voice Out (mix.enabled) removed: redundant with the engine on/off switch. */
   r.appendChild(col([ makeToggle({ key: "out_mode", cap: "External Voice", def: false }) ]));
-  r.appendChild(col([ makeMixChanSwitch() ]));
+  r.appendChild(col([ makeMixDestSwitch() ]));
   r.appendChild(col([ makeKnob({ size: "big", key: "mix.gain", cap: "Voice Vol", unit: "%", min: 0, max: 150, def: 100 }) ]));
   stack.appendChild(r);
 }));

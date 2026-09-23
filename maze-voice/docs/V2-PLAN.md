@@ -9,7 +9,7 @@ Released: Move `schwung-maze` v1.4.0 (voice module only), Force `force-maze` tag
 OPEN (nothing here is started unless noted):
 1. **Glitch / crackle (both Force and Move).** User reports a slight crackle, sometimes. NOT diagnosed. Offline: DSP is ~1% of realtime on x86 and shows only 2 large sample jumps in ~1M samples over 40 retriggered notes, so the synthesis itself looks clean. Force suspects: maze_host renders on a free-running timer with an open-loop clock-drift correction (RATE_CORRECTION in maze_host.cpp) into a shm ring read by MPC's ALSA-clocked capture thread; ring underruns/trims cause clicks (documented in maze_host.cpp; adaptive fixes were deliberately reverted, don't reintroduce without an isolated measurement session). Move suspects: unknown, needs a repro. NEXT STEP: get a capture from the user, check whether the crackle lines up with ring underruns/trims (add counters), and note which notes/settings trigger it. The -79 dB noise floor (NOISE_FLOOR) is a hiss candidate in internal mode.
 2. **Hardware-clocked (pull) rendering on the Force.** Idea: make forceAudioJack.so (the consumer, on MPC's capture thread) drive the producer so it renders exactly the frames requested, instead of a free-running timer with drift estimate. Touches force-audio-jack and every addon using it; needs measured testing. Do after the glitch capture confirms underruns are the cause.
-3. **force-audio-jack destination routing** (IN1, IN2, IN1&2, OUT3, OUT4, OUT3&4): see section 6. Deferred by the user. Independent of VOICE MODE.
+3. **force-audio-jack destination routing** (IN1, IN2, IN1&2, OUT3, OUT4, OUT3&4): DONE 2026-09-23, see section 6. Independent of VOICE MODE.
 4. **Web GUI Voice page re-layout (Force)**: keys into the oscillator area, stacked envelopes, remove Voice Out (removed already), output gain last, channel to top. Deferred by the user until "when we do the LFO work"; the LFO web sections are done but this re-layout is not.
 5. **Channel selector in the top bar (shadow GUI)**: needs a force_shadow.c change (the conf format has no top-bar controls). User said not to worry about it. CHANNEL currently sits in the Mixer frame.
 6. **Filter Drive as an LFO destination**: the shadow page omits it (user request). It is still in the DSP (lfoN_filt_drive), Force module.json and the web GUI. Decide whether to remove it there too.
@@ -100,11 +100,16 @@ Param count +5x2 +9x2 = 28; need a second Q-Link bank page or web/shadow-only (s
 ```
 Implemented as a new `[tab MOD]` in `shadow_page.conf` + a MOD section in `web/index.html`.
 
-## 6. force-audio-jack destination routing (DEFERRED, later work)
-Add per-ring destination field to `forceAudioInject.h` header: IN1, IN2, IN1&2, OUT3, OUT4, OUT3&4.
-OUT3/4 requires a second hook on `snd_pcm_writei` summing into playback ch 3/4 — VERIFY the Force ALSA
-playback device is multichannel first. Applies to ALL addons using force-audio-jack, each exposes the choice.
-maze-voice: independent of out_mode. Needs the restart-acvs LD_PRELOAD workflow; test separately.
+## 6. force-audio-jack destination routing (DONE 2026-09-23)
+`forceAudioInject.h`'s out-bus ring (`AI_SHM_NAME_FMT_OUT`/`AI_MAX_OUT_VOICES`) already existed
+(force-audio-jack's "Add out-bus injection and Skipback" work) with its own `snd_pcm_writei` hook
+summing into playback ch 3/4 — confirmed multichannel on this device. `maze_host` now opens both
+the in-bus and out-bus rings at startup and always renders into both; a new `mix.dest`/`mix.dest_idx`
+control just flips which ring is `enabled` (mixed by forceAudioJack.so), so switching destination
+never resumes from a stale ring backlog. Six options: IN1, IN2, IN1+IN2, OUT3, OUT4, OUT3+OUT4 (web
+GUI: full labels `IN1,2`/`OUT3,4`; shadow GUI: `I1+2`/`O3+4` since its enum options list is itself
+comma-delimited). Applied to all three force-audio-jack voice addons (maze-voice, force-jv880,
+force-dx7); each exposes the same choice independently. Live-tested via restart-acvs on the device.
 
 ## 7. Work order
 1. [x] Docs (this file)
@@ -112,7 +117,7 @@ maze-voice: independent of out_mode. Needs the restart-acvs LD_PRELOAD workflow;
 3. [x] Schwung UI: out_mode in module.json (Tone menu level) + web_ui.html toggle (not yet device-tested)
 4. [x] (web LFO section done; web re-layout of Voice page NOT done, deferred) Force UI: DONE = shadow_page.conf voice page re-layout + OUT MODE enum (offline-rendered OK), web toggle, Voice Out removed. TODO = web GUI re-layout (keys into osc area, stacked env), CHANNEL to TOP BAR (needs force_shadow.c change; interim: in Mixer frame), MOD tab now only Randomise (LFO frames go here)
 5. [x] LFO DSP + params + Mod page (shadow) + web GUI sections: BUILT + STAGED on Force (not yet live-tested). See 'LFO implementation notes'.
-6. [ ] force-audio-jack OUT3/4 (later)
+6. [x] force-audio-jack OUT3/4: destination selector (IN1/IN2/IN1+2/OUT3/OUT4/OUT3+4), all three voice addons, live-tested
 Open questions: none blocking. Ask user before adding HP tap or changing CC map.
 
 ## Deploy log
