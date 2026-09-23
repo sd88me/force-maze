@@ -372,7 +372,8 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
                         script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|%d" % (x, y, tw, th, LCD, SEG_ON if border else LINE, border),
                                    "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
                     key = "shRow_%dx%d" % (tw, th)
-                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Q-Link"), _action("Enter Pressed", "Toggle Switch")],
+                    # the Value label lies over the button and takes the touch, so the row itself toggles on touch
+                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
                                                 [_focus(tw, th), _button(img + "_on.png", img + "_off.png", 1, 1, tw, th),
                                                  _value_label(12, 0, tw - 24, th, 24.0, ACCENT, "left verticallyCentred")]))
                     kids.append(_placed(key, "%s %d" % (name, slot + 1), index[sk], x, y, tw, th, focus="Yes" if slot == 0 else "No"))
