@@ -103,20 +103,17 @@ run unattended.
 ./scripts/build.sh       # armhf-native (QEMU) build -> addon/maze_seq_host
 ```
 
-## Touchscreen page
+## Touchscreen GUI (shadow mode)
 
-`addon/shadow_page.conf` defines this module's on-device control page for
-[force-shadow](https://github.com/sd88me/force-shadow) (`SHIFT+SCENE-4`),
-in the same palette as the web panel. Three tabs:
+A full editor page for the Force's own touchscreen, rendered by
+[`force-shadow`](https://github.com/sd88me/force-shadow): open it with
+`SHIFT+SCENE-4`, in the same palette as the web panel.
 
-- **SEQUENCERS** — Sequencer A / B stacked on the left two-thirds (8
-  tappable step LEDs per sequencer: tap to flip, a white halo marks the
-  play head; plus corrupt, CV range, length, channel, and an Advance
-  button); TIMING / MIX on the right third (note rate, note length, trig
-  mix, reset both).
-- **GLOBAL** — scale and key pickers, transpose, pad transpose, panic.
-- **LFO** — two side-by-side panels, one per LFO, matching Maze Voice's own
-  LFO page layout.
+| Tab | Contents |
+|-----|----------|
+| SEQUENCERS | Sequencer A / B stacked on the left two-thirds (8 tappable step LEDs per sequencer: tap to flip, a white halo marks the play head; plus corrupt, CV range, length, channel, and an Advance button); TIMING / MIX on the right third (note rate, note length, trig mix, reset both) |
+| GLOBAL | Scale and key pickers, transpose, pad transpose, panic |
+| LFO | Two side-by-side panels, one per LFO, matching Maze Voice's own LFO page layout |
 
 ## Project layout
 

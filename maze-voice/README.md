@@ -127,14 +127,18 @@ The engine's autoload is deliberately disabled at boot for this reason —
 only the audio tap arms at boot, with zero voices attached; start
 `maze_host` itself afterwards from the nodeServer Modules page.
 
-## Touchscreen page
+## Touchscreen GUI (shadow mode)
 
-`addon/shadow_page.conf` defines this module's on-device control page for
-[force-shadow](https://github.com/sd88me/force-shadow) (`SHIFT+SCENE-3`),
-with three tabs: **VOICE** (oscillators, envelopes, mixer/tone), **WAVEFOLDER
-/ FILTER**, and **MOD / RANDOM** (randomise controls plus both LFOs). It's
-discovered automatically at force-shadow startup — no rebuild needed to
-change it.
+A full editor page for the Force's own touchscreen, rendered by
+[`force-shadow`](https://github.com/sd88me/force-shadow): open it with
+`SHIFT+SCENE-3`. It's discovered automatically at force-shadow startup — no
+rebuild needed to change it.
+
+| Tab | Contents |
+|-----|----------|
+| VOICE | Oscillators, envelopes, mixer/tone |
+| WAVEFOLDER / FILTER | Wavefolder (fold amount, bias), state-variable filter (cutoff, resonance, drive), ORDER routing and Blend |
+| MOD / RANDOM | Both LFOs, randomise controls |
 
 ## Building from source
 
