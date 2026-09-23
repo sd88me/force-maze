@@ -3,7 +3,7 @@
 # ForceMazeVoice — deliberately a no-op (2026-09-13).
 #
 # This addon no longer arms any LD_PRELOAD tap or auto-starts maze_host at
-# boot - that's ForceAudioIn's job now (see its own README.md), and
+# boot - that's ForceAudioJack's job now (see its own README.md), and
 # maze_host is only ever started on demand via the nodeServer Modules page
 # (/moduler), never at boot. NSMODULE.json also sets AUTOLAUNCHABLE:false
 # for this reason.

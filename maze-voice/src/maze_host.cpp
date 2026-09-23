@@ -10,9 +10,9 @@
  *   render_block() per 128-frame SPI block wall-clock timer thread -> render_block()
  *   set_param(key, "42") from a knob       a local control socket -> set_param()
  *   knob repaint via get_param             the web UI's /describe calls get_param
- *   int16 stereo out via the mailbox       float32 into ForceAudioIn's shared-
+ *   int16 stereo out via the mailbox       float32 into ForceAudioJack's shared-
  *                                          memory ring (forceAudioInject.h) --
- *                                          forceAudioIn.so (LD_PRELOAD'd into
+ *                                          forceAudioJack.so (LD_PRELOAD'd into
  *                                          /usr/bin/MPC) mixes it into what MPC
  *                                          reads from its capture device.
  *
@@ -179,9 +179,9 @@ static bool shm_setup() {
 /* Push `frames` stereo frames (already float32, [-1,1]) into the ring.
  * Drops from the OLDEST-writable position (i.e. simply doesn't advance head
  * past available space) rather than ever blocking -- this is the producer
- * side, so unlike forceAudioIn.so's consumer path there is no RT thread to
+ * side, so unlike forceAudioJack.so's consumer path there is no RT thread to
  * protect here, but we still never want to stall the render loop's cadence
- * waiting for forceAudioIn.so to catch up. */
+ * waiting for forceAudioJack.so to catch up. */
 static void ring_push_one(ai_shm_t *shm, const float *interleaved, uint32_t frames) {
     if (!shm) return;
     uint32_t head = shm->head;                                     /* sole producer */
@@ -262,7 +262,7 @@ static void on_midi_cb(double /*dt*/, std::vector<unsigned char> *msg, void * /*
  * A fixed "always render 128" cadence (the first version of this loop) falls
  * behind real time whenever sleep_for() or the mutex is delayed by scheduler
  * jitter -- ordinary and expected on a non-RT thread sharing the box with
- * MPC's own audio thread. The ring's CONSUMER (forceAudioIn.so, running on
+ * MPC's own audio thread. The ring's CONSUMER (forceAudioJack.so, running on
  * MPC's real ALSA-clocked capture thread) keeps pulling at the true hardware
  * rate regardless, so any shortfall here shows up as a ring underrun --
  * audible as a click, more so on low notes where masking from high-frequency
@@ -293,7 +293,7 @@ static std::atomic<uint64_t> g_total_wakes{0};
  * is how you get exactly that kind of contradictory result. Back to the
  * fixed measurement (~44-45 frames/sec of drift, ~1000ppm, stable and
  * repeatable across sessions) plus a generous ~100/200ms ring buffer
- * (forceAudioIn.so's AI_LATENCY_TARGET_FRAMES/TRIGGER_FRAMES) to absorb the
+ * (forceAudioJack.so's AI_LATENCY_TARGET_FRAMES/TRIGGER_FRAMES) to absorb the
  * residual. Less clever, but its failure mode is a slow, rare, well-
  * understood buffer trim rather than an unpredictable feedback loop -
  * don't reintroduce adaptive correction without a properly isolated
@@ -374,7 +374,7 @@ static void timer_loop() {
  *   NOTE <note> <vel>\n   -> trigger a note (web UI "audition" button)
  *
  * "mix.*" keys are host-level output-mix controls (voice on/off, volume,
- * L/R/L+R routing) that live in the shared-memory struct forceAudioIn.so
+ * L/R/L+R routing) that live in the shared-memory struct forceAudioJack.so
  * reads directly - see forceAudioInject.h. They are intercepted here rather
  * than forwarded to g_api->set_param/get_param, which only knows maze_voice
  * .c's own chain_params (module.json) and would just error on an unknown
@@ -413,7 +413,7 @@ static bool handle_mix_set(const std::string &key, const std::string &val) {
     }
     if (key == "mix.gain") {
         /* wire value is percent (0..~150, matching every other level knob in
-         * this UI) - forceAudioIn.so wants a plain linear multiplier. */
+         * this UI) - forceAudioJack.so wants a plain linear multiplier. */
         float g = std::strtof(val.c_str(), nullptr) / 100.0f;
         g_shm_in->gain = g;
         g_shm_out->gain = g;
@@ -538,7 +538,7 @@ static void usage(const char *me) {
         "  --module-dir PATH     dir containing module.json (default: .)\n"
         "  --ctrl-sock PATH      control socket path     (default: /tmp/maze_ctrl.sock)\n"
         "  --control-channel N   1-16, CC-in for the Q-Link track (default: 1)\n"
-        "  --mix-slot N          voice slot 0..%d for forceAudioIn.so (default: 0) -\n"
+        "  --mix-slot N          voice slot 0..%d for forceAudioJack.so (default: 0) -\n"
         "                        each simultaneous voice needs a distinct slot\n",
         me, AI_MAX_VOICES - 1);
 }
@@ -602,7 +602,7 @@ int main(int argc, char **argv) {
     fprintf(stderr,
         "[maze] up. port '%s:In (Mockba)'  ctrl socket %s  shm %s/%s  ctrl ch %d\n"
         "[maze] route a MIDI track to '%s:In (Mockba)' for notes and CC (Q-Link); audio\n"
-        "[maze] is mixed into the Force's capture input via ForceAudioIn (must be enabled).\n",
+        "[maze] is mixed into the Force's capture input via ForceAudioJack (must be enabled).\n",
         client.c_str(), g_ctrl_sock_path.c_str(), g_shm_name_in, g_shm_name_out, g_ctrl_ch + 1, client.c_str());
 
     std::thread timer(timer_loop);
