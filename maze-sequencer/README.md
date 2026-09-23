@@ -1,133 +1,157 @@
-# Force Maze Sequencer
+# Maze Sequencer
 
-Port of `schwung-maze`'s **Maze** sequencer — a dual 8-step generative
-sequencer (Moog Labyrinth style), originally an "overtake tool" for Ableton
-Move — to the **Akai Force** running
+A dual 8-step generative sequencer (Moog Labyrinth style), ported from
+[`schwung-maze`](https://github.com/sd88me/schwung-maze) (originally an
+"overtake tool" for Ableton Move) to the **Akai Force** running
 [MockbaMod](https://github.com/MockbaTheBorg/MockbaMod). Sibling module to
-[`../maze-voice`](../maze-voice/README.md) in this repo; see the top-level
-[`../README.md`](../README.md) for how the two relate.
+[`../maze-voice`](../maze-voice/README.md) in this repo — pair them for a
+full generative-sequencer + synth-voice rig, or drive any other instrument
+track with Maze Sequencer's MIDI output.
 
-Unlike Maze Voice (a real audio DSP synth) or `force-acid` (a MIDI-FX that
-processes an incoming stream), this is the simplest of the three ports: a
-pure **MIDI generator** that steps entirely off incoming MIDI transport
-bytes (clock/start/stop) and writes notes to its own output port — no audio,
-no `tick()`/`render_block()` timer abstraction to reimplement at all.
+Maze Sequencer is a pure **MIDI generator**: it steps entirely off incoming
+MIDI transport bytes (clock/start/stop) from the Force and writes notes to
+its own virtual output port — no audio synthesis, just sequencing.
 
-## How the port works
+## Features
 
-| Layer | Move | Force |
-|---|---|---|
-| Sequencer | `dsp.so` (`maze_seq.c`) | `src/maze_seq_core.c` — **same file**, only the header swapped + a runtime-set state path (see its own file header) |
-| Host | Schwung's overtake-tool manager | `src/host_shim.cpp` — standalone process, RtMidi in/out, no timer thread needed |
-| Params | knobs → `set_param("42")` | MIDI **CC** on a control channel → rescale → `set_param`, or the web panel |
-| Clock | Move's own transport, fed as MIDI bytes | Force transport: MIDI clock + Start/Stop into the virtual port, unchanged |
-| Persistence | `/data/UserData/schwung/tool_state/maze_seq.bin` | `<addon dir>/maze_seq.bin` — same binary format, FORCE-ONLY path |
-| Output channel | independent per sequencer, **unmodified from upstream** | same — `maze_seq.c` was never subject to Move's chain-host one-channel-per-slot restriction (see `src/maze_seq_core.c`'s header) |
-| UI | pads + step buttons + knobs on the Move display | CC map ([`docs/CC-MAP.md`](docs/CC-MAP.md)); a Force track template ([`docs/capture-xtk.md`](docs/capture-xtk.md)); a browser panel (`web/`, ported from `schwung-maze`'s own `web_ui.html`) |
+- **Dual 8-step generative sequencers**, each with per-step random CV,
+  quantised to a scale.
+- **Corrupt (0–100)** — mutates stored voltages; past the midpoint also
+  flips bits, producing evolving patterns.
+- **CV Range (0–100)** — bipolar pitch spread around the root.
+- **Trig Mix** — velocity crossfade between Seq 1 and Seq 2.
+- **Length**, **bit flip**, and **advance** per sequencer.
+- **Sequence Reset** — snap a sequencer's play-head back to step 1 every
+  1/2/4/8 bars (or off), bar-aligned at any note rate; a **Reset Both**
+  control resets both together.
+- **12 scales**, selectable key, note rate (1/32 … 1 bar), and gate length.
+- **Independent output channel per sequencer** — route Seq 1 and Seq 2 to
+  different instrument tracks.
+- **Two LFOs**, each with a choice of saw/triangle/sine/square/
+  sample-and-hold shapes and a free-running or MIDI-clock-synced rate, with
+  bipolar depth to eight destinations: Seq 1 corrupt, range, and length,
+  Seq 2 corrupt, range, and length, trig mix, and note length. Since there's
+  no per-sample audio path here, LFOs advance once per incoming MIDI clock
+  pulse (24 ppqn); sync-mode tempo is estimated from the wall-clock gap
+  between pulses.
+- **Clock-synced** to the Force transport (24 ppqn, start/stop/continue).
+- **Pattern and parameter persistence** — survives a restart.
+- Full web control panel with a live-tracking step display, a Q-Link track
+  template for physical-knob control, and an on-device touchscreen page.
 
-## Layout
+## Using Maze Sequencer
+
+In Preferences → MIDI, enable **Clock** (not just Track) on `Mockba Maze Seq
+In` — see the hard rule below, this is easy to miss. Also enable Track on
+`Mockba Maze Seq Out`. Route:
+
+- A MIDI track named `MAZE SEQ CTRL` → `Mockba Maze Seq In` channel 1, with
+  `Force Maze Seq Control.xtk` loaded onto it, for physical-knob control.
+- One or two instrument tracks ← `Mockba Maze Seq Out`, on whichever
+  channel(s) `s1_channel`/`s2_channel` are set to (both default to channel
+  1 — change one of them if you want the two sequencers driving different
+  instruments).
+
+Press Play. Or skip the hardware knobs entirely and use the web panel at
+`http://<force-ip>:8305`, which mirrors every control and shows a
+genuinely live-updating step display and play-head.
+
+## Hard rule: enable Clock, not just Track, on the input port
+
+The engine only starts sequencing on a real MIDI Start/Continue byte
+(`0xFA`/`0xFB`). With only **Track** enabled on `Mockba Maze Seq In` (not
+**Clock**), that byte never arrives — no notes are ever generated, and the
+web panel correctly shows "Stopped" even while the Force is visibly
+playing. This is the single most common setup mistake with this module.
+
+## Requirements
+
+- An Akai Force running [MockbaMod](https://github.com/MockbaTheBorg/MockbaMod).
+- No other addon dependency — Maze Sequencer only needs virtual MIDI ports,
+  which MockbaMod provides natively.
+- For the touchscreen page: [force-shadow](https://github.com/sd88me/force-shadow).
+
+## Installation
+
+```bash
+./scripts/build.sh                # -> addon/maze_seq_host
+scripts/deploy.sh root@<force-ip> # scp's addon/, enables engine + web panel
+```
+
+(Or, from the repo root, `scripts/deploy.sh root@<force-ip> sequencer` to
+deploy just this module alongside Maze Voice — see the top-level README.)
+This replaces manually running:
+
+```bash
+ssh root@<force-ip> 'rm -rf /media/662522/AddOns/ForceMazeSeq'    # scp -r nests otherwise
+scp -r addon root@<force-ip>:/media/662522/AddOns/ForceMazeSeq
+ssh root@<force-ip> '/media/662522/AddOns/ForceMazeSeq/manage.sh ENABLE'
+ssh root@<force-ip> '/media/662522/AddOns/ForceMazeSeq/web/manage.sh ENABLE'   # web panel
+```
+
+The engine and the web panel are two separate addons — enabling one does
+not enable the other. Unlike Maze Voice, the engine here auto-launches at
+boot (no `LD_PRELOAD` involvement), so `deploy.sh` enabling it is safe to
+run unattended.
+
+## Building from source / testing
+
+```bash
+./tests/run.sh          # native logic smoke test, no Docker: sequencing,
+                         # note on/off balance, independent per-sequencer
+                         # output channel, state-persistence round-trip
+./scripts/build.sh       # armhf-native (QEMU) build -> addon/maze_seq_host
+```
+
+## Touchscreen page
+
+`addon/shadow_page.conf` defines this module's on-device control page for
+[force-shadow](https://github.com/sd88me/force-shadow) (`SHIFT+SCENE-4`),
+in the same palette as the web panel. Three tabs:
+
+- **SEQUENCERS** — Sequencer A / B stacked on the left two-thirds (8
+  tappable step LEDs per sequencer: tap to flip, a white halo marks the
+  play head; plus corrupt, CV range, length, channel, and an Advance
+  button); TIMING / MIX on the right third (note rate, note length, trig
+  mix, reset both).
+- **GLOBAL** — scale and key pickers, transpose, pad transpose, panic.
+- **LFO** — two side-by-side panels, one per LFO, matching Maze Voice's own
+  LFO page layout.
+
+## Project layout
 
 ```
 src/
-  maze_seq_core.c    schwung-maze's maze_seq.c, verbatim but for the include
-                      line and a small FORCE-ONLY state-path change (see its
-                      own file header for exactly what and why)
-  maze_seq_host.h     the 2 host/plugin ABI symbols the core needs, re-declared
+  maze_seq_core.c     schwung-maze's maze_seq.c, verbatim but for the
+                      include line and a small FORCE-ONLY state-path change
+  maze_seq_host.h     the host/plugin ABI symbols the core needs, re-declared
   host_shim.cpp       RtMidi virtual ports, CC->set_param, control socket, main()
-  rtmidi/             vendored RtMidi 6 (ALSA backend), same copy as
-                      force-acid/../maze-voice
-addon/                MockbaMod addon: NSMODULE.json, manage.sh, run_maze_seq.sh,
-                      Force Maze Seq Control.xtk (Q-Link track template),
-                      web/ (bundled copy of the web panel below)
-web/                  a SEPARATE addon (the web panel), independently enabled
-  index.html          control panel, ported from schwung-maze's own web_ui.html
-                      (rack look, SVG knobs, step-LED bits strips all unchanged);
-                      only the transport (Move's schwungRemote/postMessage API)
-                      is swapped for fetch() calls + a GET /state poll loop
-  server.py           stdlib-only HTTP server bridging the page to
-                      host_shim's Unix control socket (SET/GET), with a
-                      state-JSON fallback for the many knob params
-                      get_param() doesn't answer directly - see its own header
-  manage.sh, run_maze_seq_web.sh   its own ENABLE/DISABLE, PID-file based
-scripts/
-  Dockerfile, build.sh          armhf-native (QEMU) build, writes straight
-                                into addon/, same toolchain as force-acid
-  build_xtk.py, xtk-seed.json    generates addon/Force Maze Seq Control.xtk
+  rtmidi/             vendored RtMidi 6 (ALSA backend)
+addon/                the MockbaMod addon: manage.sh, run_maze_seq.sh,
+                      Force Maze Seq Control.xtk, shadow_page.conf,
+                      web/ (bundled copy of the web panel)
+web/                  the web control panel, a separate addon
+  index.html           control panel UI, live step/play-head display
+  server.py            stdlib-only HTTP bridge to host_shim's control socket
+  manage.sh, run_maze_seq_web.sh
+scripts/              Dockerfile/build.sh (armhf build), build_xtk.py (generates the .xtk)
 docs/
-  CC-MAP.md                      the CC assignments (2 pages + the
-                                  independent-channel feature)
-  capture-xtk.md                 the .xtk format's reverse-engineering notes
+  CC-MAP.md            the CC assignments
+  capture-xtk.md        .xtk format notes
 tests/
-  run.sh, test_smoke.c           native (non-ARM) smoke test: sequencing
-                                  logic, independent per-seq output channel,
-                                  and the state-persistence round-trip
-nodeserver-integration/  patches for the SEPARATE nodeServer addon (home-page
-                        link) - see its own README.md
+  run.sh, test_smoke.c  native (non-ARM) smoke test
+nodeserver-integration/  patches for the separate nodeServer addon (home-page link)
 ```
 
-## Build & deploy
+## Related projects & credits
 
-```bash
-./tests/run.sh                                          # logic check, no Docker
-
-./scripts/build.sh                                       # -> addon/maze_seq_host  (needs Docker)
-ssh root@<force-ip> 'rm -rf /media/662522/AddOns/ForceMazeSeq'   # scp -r nests otherwise, see ../DESIGN.md
-scp -r addon root@<force-ip>:/media/662522/AddOns/ForceMazeSeq
-ssh root@<force-ip> '/media/662522/AddOns/ForceMazeSeq/manage.sh ENABLE'
-ssh root@<force-ip> '/media/662522/AddOns/ForceMazeSeq/web/manage.sh ENABLE'   # the web panel
-```
-
-Then on the Force: Preferences → MIDI, enable **Clock** (not just Track) on
-`Mockba Maze Seq In` — this is the one that's easy to miss and the engine
-has no other way to know the transport is running (`maze_seq_core.c` only
-sets its internal `running` flag on an actual `0xFA`/`0xFB` Start/Continue
-byte; with Clock off it never arrives, no notes are ever generated, and the
-web panel correctly shows "Stopped" even while the Force is visibly
-playing). Also enable Track on `Mockba Maze Seq Out`; a MIDI track named
-`MAZE SEQ CTRL` → `Mockba Maze Seq In` ch 1 for CC control (load
-`Force Maze Seq Control.xtk` onto it for pre-named knobs); one or two
-instrument tracks ← `Mockba Maze Seq Out`, on whichever channel(s)
-`s1_channel`/`s2_channel` are set to (both default to 1); press Play.
-Or skip the hardware knobs entirely and use the web panel at
-`http://<force-ip>:8305`.
-
-## Status
-
-**v0.9 (2026-09-14)** — built for armhf, deployed, and hardware-verified end
-to end, including the web panel's engine Start/Stop and nodeServer home-page
-link. Held back from v1 pending a final tidy-up pass (removing
-development-only references) and any tweaks from further hands-on testing.
-
-Native logic smoke
-test passes (`tests/run.sh`): sequencing, note on/off balance, independent
-per-sequencer output channel, and the state-persistence round-trip (save →
-reload → same channels/lengths) all verified on the host architecture.
-Deployed to a live Force: both addons enable cleanly, `maze_seq_host`'s
-virtual ALSA ports register, and the web panel's SET/GET round-trips
-against the real running engine (confirmed live: `s2_channel`, `s1_length`).
-Real transport clock confirmed too: both sequencers' play-heads observed
-advancing live via `GET /state` once **Clock** was enabled on
-`Mockba Maze Seq In` (see the deploy steps above — Track alone isn't
-enough). Not yet confirmed on hardware: the `.xtk` template on a real
-touchscreen — see `DESIGN.md`'s TODO list.
+- [MockbaMod](https://github.com/MockbaTheBorg/MockbaMod) ([mockbatheb.org](http://mockbatheb.org/)) —
+  the addon firmware framework this runs on.
+- [`schwung-maze`](https://github.com/sd88me/schwung-maze) — the original
+  Ableton Move module this ports.
+- Sibling module: [`../maze-voice`](../maze-voice/README.md) — a matching
+  monosynth voice this sequencer can drive.
 
 ## License
 
-Inherits `schwung-maze`'s terms for `maze_seq_core.c`.
-
-## Shadow-mode touchscreen page
-
-`addon/shadow_page.conf` defines this module's on-device control page for
-[force-shadow](https://github.com/sd88me/force-shadow) (slot 4, opened with
-`SHIFT+SCENE-4`), in the same palette as the web panel. Two tabs:
-
-- **SEQUENCERS** - left two-thirds: Sequencer A / B stacked (8 tappable step LEDs: tap = flip, white
-  halo = play head; corrupt, CV range, length, channel; ADVANCE steps forward);
-  right third: TIMING / MIX (note rate, note length, trig mix, reset both).
-- **GLOBAL** - SCALE and KEY pickers (tile lists, like DX7's bank/patch
-  picker), transpose, pad transpose, panic.
-
-Needs force-shadow's `bits` widget and `button ... val=`. `maze_seq_host`
-answers `GET scale_names` / `key_names` and falls back to the state JSON for
-any individual key. Deploy to `AddOns/ForceMazeSeq/shadow_page.conf`; the
-host change needs a `scripts/build.sh` rebuild.
+MIT — see the [top-level LICENSE](../LICENSE). Copyright © sd88me.

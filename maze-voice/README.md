@@ -1,193 +1,183 @@
-# force-maze
+# Maze Voice
 
-Port of [`schwung-maze`](https://github.com/sd88me/schwung-maze)'s **Maze
-Voice** — a monophonic Moog Labyrinth-style thru-zero oscillator / wavefolder
-/ state-variable filter voice, originally a native DSP synth module for
-Ableton Move — to the **Akai Force** running
-[MockbaMod](https://github.com/MockbaTheBorg/MockbaMod).
+A monophonic Moog Labyrinth-style thru-zero oscillator / wavefolder /
+state-variable-filter synth voice, ported from
+[`schwung-maze`](https://github.com/sd88me/schwung-maze) (originally a
+chainable sound-generator module for Ableton Move) to the **Akai Force**
+running [MockbaMod](https://github.com/MockbaTheBorg/MockbaMod).
 
-Unlike [`force-acid`](https://github.com/sd88me/force-acid) (a MIDI-FX
-*generator* port, output is MIDI), this is a real **audio DSP synth**: it
-renders actual samples and mixes them into what the Force's own app reads
-from its audio-in capture device, so the voice comes out on a normal
-Audio-In track.
+Unlike a MIDI-FX or MIDI-generator addon, Maze Voice is a real **audio DSP
+synth**: it renders actual samples and mixes them into what the Force's own
+app reads from its audio-in capture device, so the voice comes out on a
+normal Audio-In track — play it from a MIDI track routed to Maze Voice's
+virtual input port, and monitor/record it like any other audio source.
 
-## How it works
+## Features
 
+- Two low-harmonic oscillators — a sine **VCO** and a wide-range triangle
+  **MOD VCO** — coupled by **thru-zero FM** (stays in tune at any depth) and
+  **ring modulation**.
+- Variable-tone **noise** generator, morphing dark to bright.
+- Diode/transistor-style **wavefolder** with a **Bias** control for
+  asymmetric folding (even vs odd harmonic emphasis).
+- Two-pole **state-variable filter** morphing continuously from lowpass to
+  bandpass, with a nonlinear resonance stage that saturates and blooms as it
+  approaches self-oscillation rather than ringing cleanly, plus a **Filt
+  Drive** stage into the filter input for extra grit.
+- Three-way **ORDER** routing (`VCW>VCF`, Parallel, `VCF>VCW`) with a
+  bipolar **Blend** crossfader between the wavefolder and filter paths.
+- Two decay-only envelopes — EG1 (modulation) and EG2 (VCA amplitude) — with
+  a musically weighted, exponential time response.
+- **Two LFOs**, each with a choice of saw/triangle/sine/square/sample-and-hold
+  shapes, free-running or MIDI-clock-synced rate (with optional
+  retrigger-on-note), and bipolar depth to eight destinations: VCO pitch,
+  Mod pitch, FM depth, filter cutoff, Env1 decay, Env2 decay, filter drive,
+  fold amount, and fold bias.
+- **External Voice mode** — an alternate output tap that sends the raw,
+  post-wavefolder oscillator mix out ungated and unfiltered (no blend, no
+  VCA envelope, no filter), for feeding an external analogue filter or amp
+  chain instead of using the built-in filter/VCA path.
+- Per-channel warm overdrive (VCO, Mod, and Noise each break up
+  independently above unity), a Boss-pedal-style overdrive stage on the
+  final output (drive → asymmetric soft clip → passive tone), oversampling
+  and anti-aliasing on every nonlinear stage, per-voice drift and detune,
+  and a low analogue noise floor.
+- Full web control panel, a Q-Link track template for physical-knob control,
+  and an on-device touchscreen page (see below).
+
+## Using Maze Voice
+
+Route a MIDI track to `Mockba Maze:In` for notes, and monitor/record from
+the Force's Audio-In track that corresponds to the audio-injection tap's
+capture device (see Requirements below). Control it from any of:
+
+- **The web control panel** at `http://<force-ip>:8304` — every parameter,
+  laid out like the original Move panel (Oscillators / Mixer / Wavefolder →
+  Filter / Mod / LFO). The "Audition" strip at the bottom plays a note
+  straight from the page, no MIDI keyboard needed to hear a change take
+  effect.
+- **Physical Q-Link knobs** — a MIDI track named `MAZE CTRL` routed to
+  `Mockba Maze:In` channel 1, with `addon/Force Maze Control.xtk` loaded
+  onto it, gives 16 pre-named knobs for the most commonly tweaked
+  parameters. See `docs/CC-MAP.md` for the full assignment (16 of
+  `maze_voice.c`'s ~60 parameters — the rest stay web/touchscreen-only).
+- **The touchscreen page** (see below).
+
+For an external filter/amp chain, switch **VOICE MODE** to External on the
+Voice page (web panel or touchscreen) — the filter, blend, and VCA envelope
+are bypassed and the raw oscillator/wavefolder mix is sent out instead.
+
+## Requirements
+
+- An Akai Force running [MockbaMod](https://github.com/MockbaTheBorg/MockbaMod).
+- [`force-audio-jack`](https://github.com/sd88me/force-audio-jack) — a separate,
+  shared MockbaMod addon that injects synthesized audio into what the
+  Force's app reads from its audio-in capture device. Maze Voice depends on
+  it rather than bundling its own copy, so several voice addons can share
+  one tap. Enable it once; it is already bundled in the
+  [`sd88me/MockbaMod`](https://github.com/sd88me/MockbaMod) fork at
+  `SD/AddOns/ForceAudioJack`.
+- For the touchscreen page: [force-shadow](https://github.com/sd88me/force-shadow)
+  v1.0.0 or later.
+
+## Installation
+
+1. **Enable the shared audio tap** (once, even if another voice addon
+   already needs it):
+   ```
+   ssh root@<force-ip> '/media/662522/AddOns/ForceAudioJack/manage.sh ENABLE'
+   ```
+2. **Deploy this addon** — one command does the scp and enables both the
+   engine and the web panel:
+   ```bash
+   scripts/deploy.sh root@<force-ip>
+   ```
+   (Or, from the repo root, `scripts/deploy.sh root@<force-ip> voice` to
+   deploy just this module alongside Maze Sequencer — see the top-level
+   README.) This is equivalent to, and replaces, manually running:
+   ```
+   ssh root@<force-ip> 'rm -rf /media/662522/AddOns/ForceMazeVoice'
+   scp -r addon root@<force-ip>:/media/662522/AddOns/ForceMazeVoice
+   ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/manage.sh ENABLE'
+   ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/web/manage.sh ENABLE'   # web panel
+   ```
+   The engine (`addon/manage.sh`) and the web panel (`addon/web/manage.sh`)
+   are two **separate** addons — enabling one does not enable the other. The
+   web panel has no dependency on the audio tap and can stay always-on even
+   while the engine is stopped (every control just answers 503 until the
+   engine's control socket exists).
+3. **Start the engine** from the nodeServer Modules page (`/moduler`) — see
+   the hard rule below for why this should not be enabled at boot.
+4. Route a MIDI track to `Mockba Maze:In` for notes, and set up an Audio-In
+   track to monitor the injected audio (confirmed live at `hw:2` — may
+   enumerate differently if your USB device order differs).
+
+## Hard rule: do not restart `acvs` while a voice is attached
+
+Once Maze Voice has been started via the nodeServer toggle, **do not
+restart the `acvs` service** (which also fully re-runs MockbaMod's boot
+sequence) while it's running — stop the voice from the same toggle first.
+Every tested case of restarting `acvs` with a voice attached has left
+pads/buttons or WiFi unresponsive; there is currently no confirmed-safe way
+to do this. A plain reboot or `acvs` restart with **no** voice attached is
+safe and has been verified repeatedly. See `DESIGN.md`'s "Known
+limitations" for the investigation behind this rule.
+
+The engine's autoload is deliberately disabled at boot for this reason —
+only the audio tap arms at boot, with zero voices attached; start
+`maze_host` itself afterwards from the nodeServer Modules page.
+
+## Touchscreen page
+
+`addon/shadow_page.conf` defines this module's on-device control page for
+[force-shadow](https://github.com/sd88me/force-shadow) (`SHIFT+SCENE-3`),
+with three tabs: **VOICE** (oscillators, envelopes, mixer/tone), **WAVEFOLDER
+/ FILTER**, and **MOD / RANDOM** (randomise controls plus both LFOs). It's
+discovered automatically at force-shadow startup — no rebuild needed to
+change it.
+
+## Building from source
+
+```bash
+./scripts/build.sh   # maze_host, native armhf-under-QEMU Docker build
 ```
-Mockba Maze:In (virtual MIDI port, notes + CC)
-        │
-        ▼
-maze_host  ──renders──▶  maze_voice.c (verbatim DSP core, Schwung's plugin API v2)
-        │
-        ▼  (float32 stereo, shared-memory ring: forceAudioInject.h)
-forceAudioIn.so  (LD_PRELOAD'd into /usr/bin/MPC)
-        │  interposes snd_pcm_readi - mixes the ring's audio into whatever
-        │  MPC reads from its capture device (hw:2, confirmed live)
-        ▼
-Audio-In track on the Force
-```
 
-`maze_host` is a standalone process playing the role Move's chain host plays
-for the DSP core (see `src/maze_host.cpp`'s header comment) - same porting
-pattern `force-acid/src/host_shim.cpp` uses for a MIDI-FX module, but for
-audio: RtMidi in, a timer thread standing in for the SPI audio callback, and
-its render output going into a shared-memory ring instead of MIDI out.
+Writes straight into `addon/`, ready to deploy. `forceAudioJack.so` (the
+shared audio tap) is built from its own separate
+[`force-audio-jack`](https://github.com/sd88me/force-audio-jack) repo, not from
+here.
 
-`forceAudioIn.so` is the *inverse* of MockbaMod's `forceStream.so`
-(bundled with the `ForceLinkAudio` addon, which taps `snd_pcm_writei` to
-**extract** what MPC plays): this taps `snd_pcm_readi` to **inject** synthesized
-audio into what MPC reads from its capture device. It's a general-purpose
-mechanism, not maze-voice-specific, and lives in its own repo,
-[`force-audioin`](https://github.com/sd88me/force-audioin) (split out of this
-repo on 2026-09-13 — its source used to live here), deployed as its own
-standalone addon in the MockbaMod fork's
-[`SD/AddOns/ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)
-— this repo depends on it rather than bundling it, so several voice addons
-can share one tap instead of each racing to arm their own copy. That repo's
-`injectTone.c` is a fixed-tone stand-in producer used to prove the
-injection path works before wiring up a real DSP engine.
-
-## Layout
+## Project layout
 
 ```
 src/
-  maze_voice.c         schwung-maze's DSP core, byte-for-byte verbatim
-  maze_host.cpp         RtMidi in, timer-driven render, writes to the ring
-  forceAudioInject.h      shared-memory ring layout — vendored from the
-                         separate ForceAudioIn repo (its own canonical copy);
-                         keep byte-for-byte identical, it's a shared ABI
-  include/plugin_api_v1.h Schwung's plugin ABI (v1 host_api, v1/v2 plugin API)
-  rtmidi/                 vendored RtMidi 6 (ALSA backend)
-addon/                  MockbaMod addon (the ENGINE): manage.sh (no longer
-                        touches LD_PRELOAD/acvs - see below), prebuilt
-                        maze_host, module.json, NSMODULE.json (nodeServer
-                        Modules-page descriptor, Autoload deliberately
-                        disabled), Force Maze Control.xtk (Q-Link track
-                        template), web/ (bundled copy of the web GUI below
-                        - a separate addon in its own right). Does NOT
-                        bundle forceAudioIn.so/injectTone - see the
-                        separate ForceAudioIn repo/addon.
-web/                    a SEPARATE addon (the web panel), independently
-                        enabled - see "Deploy / enable"
-  index.html            control panel - ported verbatim in style/layout from
-                        schwung-maze's own web_ui.html (the "rack" look,
-                        SVG knobs, section layout all unchanged); only the
-                        transport (Move's schwungRemote/postMessage API) is
-                        swapped for fetch() calls to server.py
-  server.py             stdlib-only HTTP server bridging the page to
-                        maze_host's Unix control socket (SET/GET/DESCRIBE/NOTE)
-  manage.sh, run_maze_web.sh   its own ENABLE/DISABLE, PID-file based
-                                (same split + reasoning as force-acid's
-                                web/manage.sh + run_forceacidweb.sh)
-scripts/
-  Dockerfile, build.sh          armhf-native (QEMU) build for maze_host,
-                                same toolchain as force-acid
-  build_xtk.py, xtk-seed.json    generates addon/Force Maze Control.xtk
+  maze_voice.c            schwung-maze's DSP core, ported verbatim
+  maze_host.cpp            RtMidi in, timer-driven render, writes to the audio-tap's ring
+  forceAudioInject.h        shared-memory ring layout, vendored from force-audio-jack (keep byte-for-byte identical)
+  include/plugin_api_v1.h   Schwung's plugin ABI
+  rtmidi/                   vendored RtMidi 6 (ALSA backend)
+addon/                     the MockbaMod addon (engine): manage.sh, prebuilt
+                           maze_host, module.json, NSMODULE.json, Force
+                           Maze Control.xtk, web/ (bundled copy of the web panel)
+web/                       the web control panel, a separate addon
+  index.html                control panel UI
+  server.py                 stdlib-only HTTP bridge to maze_host's control socket
+  manage.sh, run_maze_web.sh
+scripts/                   Dockerfile/build.sh (armhf build), build_xtk.py (generates the .xtk)
 docs/
-  CC-MAP.md                      the 16 Q-Link knobs' CC assignments
-  capture-xtk.md                 the .xtk format's reverse-engineering notes
-nodeserver-integration/  patches for the SEPARATE nodeServer addon (home-page
-                        link + confirms the Modules-page entry needs no
-                        patch, just NSMODULE.json) - see its own README.md
+  CC-MAP.md                 the 16 Q-Link knobs' CC assignments
+  capture-xtk.md             .xtk format notes
+  V2-PLAN.md                design/status notes for the LFO & External Voice work
+nodeserver-integration/    patches for the separate nodeServer addon (home-page link)
 ```
 
-## Build
+## Related projects & credits
 
-```bash
-./scripts/build.sh                       # maze_host, via Docker/QEMU armhf-native
-```
-
-Writes straight into `addon/`, ready to deploy as-is. `forceAudioIn.so`/
-`injectTone` are no longer built from this repo at all — see the separate
-[`force-audioin`](https://github.com/sd88me/force-audioin) repo's own
-`scripts/build.sh`.
-
-## Deploy / enable
-
-Two independent things need to be on the device, in order:
-
-1. **The shared tap** - the separate [`force-audioin`](https://github.com/sd88me/force-audioin)
-   addon (already bundled in the MockbaMod fork at
-   [`SD/AddOns/ForceAudioIn`](https://github.com/sd88me/MockbaMod/tree/main/SD/AddOns/ForceAudioIn)),
-   enabled once (`manage.sh ENABLE`). This is what actually arms
-   `LD_PRELOAD`, and it only ever attaches zero voices at boot - see its
-   own README for why. If it's already enabled (e.g. another voice addon
-   needs it too), nothing more to do here.
-2. **This addon** (the engine):
-   ```
-   ssh root@<force-ip> 'rm -rf /media/662522/AddOns/ForceMazeVoice'   # see note below
-   scp -r addon root@<force-ip>:/media/662522/AddOns/ForceMazeVoice
-   ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/manage.sh ENABLE'
-   ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/web/manage.sh ENABLE'   # the web panel
-   ```
-   `ENABLE` here does **not** touch `LD_PRELOAD` or restart `acvs` - it
-   never has to, since the tap is ForceAudioIn's job now. Start `maze_host`
-   itself from the nodeServer Modules page (`/moduler`) once both addons
-   are in place - never at boot (Autoload is deliberately unavailable for
-   this module - see NSMODULE.json and DESIGN.md's "hard rule": an `acvs`
-   restart while a voice is attached reliably kills pads/buttons).
-
-**The `rm -rf` first matters**: `scp -r addon dest` copies `addon` itself
-as a subdirectory of `dest` if `dest` already exists (`dest/addon/...`)
-rather than merging its contents into `dest` - hit this live while
-redeploying (2026-09-13). Safe to skip only when deploying to a path that
-doesn't exist yet.
-
-**The engine and the web panel are two separate addons** (`addon/`'s own
-`manage.sh` vs. `addon/web/manage.sh`) - enabling one does not enable the
-other. The web panel has no `LD_PRELOAD`/`acvs` involvement at all and can
-stay always-on (like `force-acid`'s own web panel) even while the engine
-is stopped - every control on the page just answers 503 until
-`maze_host`'s control socket exists.
-
-Then: route a MIDI track to `Mockba Maze:In` for notes, and monitor/record
-from whichever Audio-In track corresponds to the Force's `hw:2` capture
-device (confirmed live - may enumerate differently if your USB device order
-differs). Open `http://<force-ip>:8304` for the web control panel (or use
-nodeServer's home-page "Force Maze Voice" link / Modules page, if
-nodeServer is installed - see `nodeserver-integration/README.md`) - the
-`Audition` strip at the bottom plays a note straight from the page, no MIDI
-keyboard needed to hear a change take effect.
-
-For physical knob control: a MIDI track named `MAZE CTRL` → `Mockba Maze:In`
-ch 1, with `addon/Force Maze Control.xtk` loaded onto it for 16 pre-named
-Q-Link knobs. See `docs/CC-MAP.md` for the full assignment (16 of
-`maze_voice.c`'s ~30 params - the rest stay web-only) and setup steps.
-
-## Shadow-mode touchscreen page
-
-`addon/shadow_page.conf` defines this module's on-device control page (3
-tabs: Voice, Wavefolder/Filter, Mod/Random/Mix) for
-[force-shadow](https://github.com/sd88me/force-shadow), which takes over the
-Force's touchscreen (`SHIFT+SCENE-3`) and drives `maze_host` through its
-control socket. It is discovered automatically at force-shadow startup; no
-rebuild is needed to change it. Requires force-shadow v1.0.0 or later (its
-current text renderer -- crisp hinted glyphs, tighter letter spacing -- is
-what this page now looks like). File format: force-shadow's
-`docs/adding-a-page.md`.
-
-## Status
-
-Working end-to-end and hardware-verified: DSP core ported, note-in (+ CC-in
-on a control channel), synthesized audio audible on a real Audio-In track,
-full web control panel (every `chain_params` knob/switch from
-`module.json`, styled and laid out exactly like the original Move version,
-now an independently-always-on addon), a nodeServer home-page link +
-Modules-page entry, plus a Q-Link track template for the 16 most-used
-params on physical knobs (structurally valid, not yet visually confirmed on
-a real screen - see `docs/capture-xtk.md`). Audio timing needed real tuning
-(see `DESIGN.md` for the full story) — currently a fixed clock-rate
-correction plus a generous ~100/200ms ring buffer, not yet a fully "locked"
-adaptive solution.
-
-**The engine (`addon/manage.sh`) is currently DISABLED on the test device**
-pending a fix for a confirmed boot-time race condition shared with
-MockbaMod's own `mockbaMagic`/`MidiLoop` addons (see `DESIGN.md`'s "Boot-time
-LD_PRELOAD race" section) - re-enabling it before that's fixed risks the
-same intermittent dead-pads/dead-WiFi symptom on reboot. The web panel has
-no such dependency and stays enabled.
+- [MockbaMod](https://github.com/MockbaTheBorg/MockbaMod) ([mockbatheb.org](http://mockbatheb.org/)) —
+  the addon firmware framework this runs on.
+- [`schwung-maze`](https://github.com/sd88me/schwung-maze) — the original
+  Ableton Move module this ports.
 
 ## License
 
-Inherits `schwung-maze`'s terms for `maze_voice.c`.
+MIT — see the [top-level LICENSE](../LICENSE). Copyright © sd88me.

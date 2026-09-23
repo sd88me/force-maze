@@ -15,7 +15,7 @@ ssh root@<force-ip> '/media/662522/AddOns/ForceMazeVoice/web/manage.sh ENABLE'
 Copies `run_maze_web.sh` to the top-level `AddOns/` folder and starts it
 immediately. `DISABLE`/`UNINSTALL` stop it and remove the autolaunch entry.
 This is independent of `addon/manage.sh` (the engine, `maze_host` +
-`forceAudioIn.so`'s `LD_PRELOAD` tap) - enabling this does not enable the
+`forceAudioJack.so`'s `LD_PRELOAD` tap) - enabling this does not enable the
 engine, and vice versa. The page itself works either way: every control
 just answers 503 until `maze_host`'s control socket exists.
 
