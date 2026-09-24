@@ -3,7 +3,7 @@
 #   vst/build/maze_voice.so               -> /sdcard/vst/ on the device
 #   vst/build/skin/<folder>/              -> /sdcard/Synths/ on the device
 #   vst/build/pluginlist-entry.xml        the <PLUGIN> line for MPC.settings' pluginList-arm
-# Needs checkouts of mpc-vst-plugins (MPC_VST) and force-shadow (FORCE_SHADOW) next to force-maze.
+# Needs an mpc-vst-plugins checkout (MPC_VST) next to force-maze.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 MPC_VST="${MPC_VST:-$here/../../../mpc-vst}"
