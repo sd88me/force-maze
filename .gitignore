@@ -7,3 +7,4 @@ __pycache__/
 # each module's addon/ ships prebuilt binaries deliberately (maze_host,
 # maze_seq_host) so the addon folder is ready to deploy as-is - none of the
 # patterns above touch addon/, and that's intentional.
+/dist-zip/

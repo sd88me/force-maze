@@ -45,6 +45,15 @@ Each module directory is self-contained: its own `src/`, `addon/`, `web/`,
 
 ## Installation
 
+**From a release (no build needed):** download
+`ForceMazeVoice-<version>.zip` or `ForceMazeSeq-<version>.zip` from the
+Releases page (under *Assets*, not the "Source code" archives) and unzip it
+onto the SD card root, overwriting the old files in `AddOns/ForceMazeVoice`
+/ `AddOns/ForceMazeSeq`. Then run the `manage.sh ENABLE` steps from each
+module's own README on the device.
+
+**From a checkout:**
+
 ```bash
 scripts/deploy.sh root@<force-ip>            # deploys + enables both modules
 scripts/deploy.sh root@<force-ip> voice      # ...or just one
