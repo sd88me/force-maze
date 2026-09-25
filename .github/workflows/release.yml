@@ -3,8 +3,9 @@
 # Publishing a release (web UI, gh, or API) builds the zip from that tag and
 # uploads it as a release asset. The zip holds only AddOns/ - unzip it onto
 # the SD card root. GitHub still adds its own "Source code" archives to every
-# release; those can't be turned off. VST releases (tags containing "-vst-")
-# are skipped - they ship their own payload zip.
+# release; those can't be turned off. VST releases (tags containing "-vst-",
+# e.g. the old maze-voice-vst-v1.0.0; the VST plugin now lives in
+# sd88me/mpc-vst-maze) are skipped - they ship their own payload zip.
 #
 # To backfill or rebuild an existing release's zip: Actions -> Release zip ->
 # Run workflow, and enter the tag. The packaging script always comes from the

@@ -181,6 +181,8 @@ nodeserver-integration/    patches for the separate nodeServer addon (home-page 
   the addon firmware framework this runs on.
 - [`schwung-maze`](https://github.com/sd88me/schwung-maze) — the original
   Ableton Move module this ports.
+- [`mpc-vst-maze`](https://github.com/sd88me/mpc-vst-maze) — the same voice
+  as a native MPC OS VST plugin (MPC / Force standalone plugin host).
 
 ## License
 
