@@ -534,9 +534,7 @@ static void on_midi(void* instance, const uint8_t* msg, int len, int source){
     /* Move sends note-on/off 0..9 for capacitive knob touch; raw_midi:true
      * means the host does not filter them for us. Ignore that range so a
      * knob touch cannot retrigger the voice. */
-#ifndef MAZE_VST   /* the VST build gets real notes from MPC: no knob-touch range */
     if ((st == 0x90 || st == 0x80) && d1 <= 9) return;
-#endif
     if (st == 0x90 && d2 > 0){
         v->note = (float)d1;
         v->vel  = 0.2f + 0.8f * (d2 / 127.0f);

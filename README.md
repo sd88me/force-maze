@@ -74,6 +74,9 @@ nodeServer Modules page, hard safety rules).
   the addon firmware framework both modules run on.
 - [`schwung-maze`](https://github.com/sd88me/schwung-maze) — the original
   Ableton Move modules this repo ports.
+- [`mpc-vst-maze`](https://github.com/sd88me/mpc-vst-maze) — Maze Voice as a
+  native MPC OS VST plugin, built from the same DSP core. It used to live here
+  in `maze-voice/vst/`.
 
 ## License
 
